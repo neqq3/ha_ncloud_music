@@ -219,7 +219,8 @@ class CloudMusic():
             album = item['al']['name']
             duration = item['dt']
             url = self.get_play_url(id, song, singer, MusicSource.ARTISTS.value)
-            picUrl = res['artist']['picUrl']
+            # 使用歌曲自己的专辑封面，而不是歌手头像
+            picUrl = item['al'].get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg')
             music_info = MusicInfo(id, song, singer, album, duration, url, picUrl, MusicSource.ARTISTS.value)
             return music_info
         
