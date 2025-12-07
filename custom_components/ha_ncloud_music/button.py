@@ -158,7 +158,8 @@ class CloudMusicSearchButton(CloudMusicButton):
                 singer_name = item['ar'][0]['name'] if item.get('ar') else '未知歌手'
                 album_name = item['al']['name'] if item.get('al') else ''
                 duration = item.get('dt', 0)
-                pic_url = cloud_music.netease_image_url(item['al']['picUrl']) if item.get('al') else ''
+                # 直接使用原始图片URL，不添加压缩参数（与 Media Browser 一致）
+                pic_url = item['al']['picUrl'] if item.get('al') else ''
                 
                 # 构建播放 URL（参考 cloud_music.py 中的 get_play_url 方法）
                 url = cloud_music.get_play_url(song_id, song_name, singer_name, MusicSource.PLAYLIST.value)
