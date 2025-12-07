@@ -176,6 +176,17 @@ class CloudMusic():
     # 获取专辑列表
     async def async_get_album(self, album_id):
         res = await self.netease_cloud_music(f'/album?id={album_id}')
+        songs = res.get('songs', [])
+        
+        if not songs:
+            return []
+        
+        # 批量获取歌曲详情以获取准确的封面
+        song_ids = ','.join(str(song['id']) for song in songs)
+        detail_res = await self.netease_cloud_music(f'/song/detail?ids={song_ids}')
+        
+        # 创建ID到详情的映射
+        song_details = {song['id']: song for song in detail_res.get('songs', [])}
         
         def format_album(item):
             id = item['id']
@@ -184,11 +195,15 @@ class CloudMusic():
             album = item['al']['name'] if item.get('al') else ''
             duration = item['dt']
             url = self.get_play_url(id, song, singer, MusicSource.PLAYLIST.value)
-            picUrl = item['al'].get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg') if item.get('al') else ''
+            
+            # 从详情中获取准确的封面
+            detail = song_details.get(id, {})
+            picUrl = detail.get('al', {}).get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg')
+            
             music_info = MusicInfo(id, song, singer, album, duration, url, picUrl, MusicSource.PLAYLIST.value)
             return music_info
         
-        return list(map(format_album, res['songs']))
+        return list(map(format_album, songs))
 
     # 获取电台列表
     async def async_get_djradio(self, rid):
@@ -211,6 +226,17 @@ class CloudMusic():
     # 获取歌手列表
     async def async_get_artists(self, aid):
         res = await self.netease_cloud_music(f'/artists?id={aid}')
+        hot_songs = res.get('hotSongs', [])
+        
+        if not hot_songs:
+            return []
+        
+        # 批量获取歌曲详情以获取准确的封面
+        song_ids = ','.join(str(song['id']) for song in hot_songs)
+        detail_res = await self.netease_cloud_music(f'/song/detail?ids={song_ids}')
+        
+        # 创建ID到详情的映射
+        song_details = {song['id']: song for song in detail_res.get('songs', [])}
 
         def format_playlist(item):
             id = item['id']
@@ -219,12 +245,15 @@ class CloudMusic():
             album = item['al']['name']
             duration = item['dt']
             url = self.get_play_url(id, song, singer, MusicSource.ARTISTS.value)
-            # 使用歌曲自己的专辑封面，而不是歌手头像
-            picUrl = item['al'].get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg')
+            
+            # 从详情中获取准确的封面
+            detail = song_details.get(id, {})
+            picUrl = detail.get('al', {}).get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg')
+            
             music_info = MusicInfo(id, song, singer, album, duration, url, picUrl, MusicSource.ARTISTS.value)
             return music_info
         
-        return list(map(format_playlist, res['hotSongs']))
+        return list(map(format_playlist, hot_songs))
 
     # 获取云盘音乐
     async def async_get_cloud(self):
