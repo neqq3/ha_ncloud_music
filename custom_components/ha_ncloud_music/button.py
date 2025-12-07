@@ -227,7 +227,7 @@ class CloudMusicSearchButton(CloudMusicButton):
                     
                     # 根据类型构建媒体库URI和显示名称
                     if search_key == SEARCH_TYPE_PLAYLIST:
-                        media_uri = f"cloudmusic://163/playlist?id={item_id}"
+                        media_uri =f"cloudmusic://163/playlist?id={item_id}&title={quote(item_name)}"
                         cover_url = item.get('coverImgUrl', '')
                         creator = item.get('creator', {}).get('nickname', '未知')
                         song_count = item.get('trackCount', 0)

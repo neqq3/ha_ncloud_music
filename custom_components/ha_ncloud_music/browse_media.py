@@ -724,6 +724,34 @@ async def async_browse_media(media_player, media_content_type, media_content_id)
 
     #================= FM
 
+
+    # 处理歌单播放列表
+    if media_content_id.startswith(CloudMusicRouter.playlist):
+        library_info = BrowseMedia(
+            media_class=MediaClass.DIRECTORY,
+            media_content_id=media_content_id,
+            media_content_type=MediaType.PLAYLIST,
+            title=title or '歌单',
+            can_play=True,
+            can_expand=False,
+            children=[],
+        )
+        playlist = await cloud_music.async_my_playlist(id)
+        for index, music_info in enumerate(playlist):
+            library_info.children.append(
+                BrowseMedia(
+                    title=f'{music_info.song} - {music_info.singer}',
+                    media_class=MediaClass.MUSIC,
+                    media_content_type=MediaType.PLAYLIST,
+                    media_content_id=f"{media_content_id}&index={index}",
+                    can_play=True,
+                    can_expand=False,
+                    thumbnail=music_info.thumbnail
+                )
+            )
+        return library_info
+
+
     # 处理专辑播放列表
     if media_content_id.startswith(CloudMusicRouter.album_playlist):
         library_info = BrowseMedia(
