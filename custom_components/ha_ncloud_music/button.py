@@ -23,6 +23,7 @@ from .const import (
     URI_MY_FAVORITES,
     SEARCH_TYPE_MAP,
     SEARCH_TYPE_SONG,
+    SEARCH_TYPE_ALBUM,
 )
 from .manifest import manifest
 
