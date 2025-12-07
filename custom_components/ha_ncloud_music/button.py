@@ -24,6 +24,9 @@ from .const import (
     SEARCH_TYPE_MAP,
     SEARCH_TYPE_SONG,
     SEARCH_TYPE_ALBUM,
+    SEARCH_TYPE_ARTIST,
+    SEARCH_TYPE_PLAYLIST,
+    SEARCH_TYPE_RADIO,
 )
 from .manifest import manifest
 
