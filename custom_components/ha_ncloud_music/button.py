@@ -127,8 +127,8 @@ class CloudMusicSearchButton(CloudMusicButton):
         # 3. 调用搜索 API
         _LOGGER.info(f"开始搜索: 类型={search_type_name}, 关键词={keyword}")
         try:
-            # 调用原作者的搜索接口（参考 browse_media.py 第763行）
-            # 这里使用网易云音乐的搜索接口
+            # 使用 /cloudsearch API（文档说明它比 /search 更全）
+            # 支持 type 参数：1=单曲, 10=专辑, 100=歌手, 1000=歌单, 1009=电台
             res = await cloud_music.netease_cloud_music(f'/cloudsearch?keywords={keyword}&type={api_type}&limit=20')
             
             if res.get('code') != 200:

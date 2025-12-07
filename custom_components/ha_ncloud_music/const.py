@@ -23,6 +23,7 @@ ENTITY_NAME_BROWSE_SEARCH = "browse_search"
 
 # 搜索类型键值
 SEARCH_TYPE_SONG = "song"
+SEARCH_TYPE_ALBUM = "album"
 SEARCH_TYPE_ARTIST = "artist"
 SEARCH_TYPE_PLAYLIST = "playlist"
 SEARCH_TYPE_RADIO = "radio"
@@ -30,6 +31,7 @@ SEARCH_TYPE_RADIO = "radio"
 # 搜索类型显示名称到API参数的映射
 SEARCH_TYPE_MAP = {
     "歌曲": {"type": 1, "key": SEARCH_TYPE_SONG},
+    "专辑": {"type": 10, "key": SEARCH_TYPE_ALBUM},
     "歌手": {"type": 100, "key": SEARCH_TYPE_ARTIST},
     "歌单": {"type": 1000, "key": SEARCH_TYPE_PLAYLIST},
     "电台": {"type": 1009, "key": SEARCH_TYPE_RADIO},
