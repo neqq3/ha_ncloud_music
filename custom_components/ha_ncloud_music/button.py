@@ -194,6 +194,13 @@ class CloudMusicSearchButton(CloudMusicButton):
             
             if search_key == SEARCH_TYPE_SONG:
                 # 歌曲类型：创建MusicInfo对象，可以直接播放
+                # 添加提示项作为第一项（用于显示提示文字）
+                music_list.append({
+                    'type': 'hint',
+                    'name': '🔍 想预览内容？请打开媒体库 | 选择即播放 ▶',
+                    'is_hint': True
+                })
+                
                 for item in items[:20]:
                     song_id = item['id']
                     song_name = item['name']
@@ -206,30 +213,37 @@ class CloudMusicSearchButton(CloudMusicButton):
                     music_list.append(music_info)
             else:
                 # 其他类型：存储基本信息和媒体库URI，选择后打开媒体库
+                # 添加提示项作为第一项
+                music_list.append({
+                    'type': 'hint',
+                    'name': '🔍 想预览内容？请打开媒体库 | 选择即播放 ▶',
+                    'is_hint': True
+                })
+                
                 for item in items[:20]:
                     item_id = item['id']
                     item_name = item['name']
                     
                     # 根据类型构建媒体库URI和显示名称
                     if search_key == SEARCH_TYPE_PLAYLIST:
-                        media_uri = f"cloudmusic://163/playlist/{item_id}"
+                        media_uri = f"cloudmusic://163/playlist?id={item_id}"
                         cover_url = item.get('coverImgUrl', '')
-                        creator = item.get('creator', {}).get('nickname', '')
-                        display_name = f"{item_name} [{creator}]"
-                    elif search_key == SEARCH_TYPE_ARTIST:
-                        media_uri = f"cloudmusic://163/artists/{item_id}"
-                        cover_url = item.get('picUrl', '')
-                        album_size = item.get('albumSize', 0)
-                        display_name = f"{item_name} ({album_size}张专辑)"
+                        creator = item.get('creator', {}).get('nickname', '未知')
+                        song_count = item.get('trackCount', 0)
+                        display_name = f"[歌单▶] {item_name} ({song_count}首) by {creator}"
                     elif search_key == SEARCH_TYPE_ALBUM:
-                        media_uri = f"cloudmusic://163/playlist/{item_id}"  # 专辑也用playlist处理
+                        media_uri = f"cloudmusic://163/album/playlist?id={item_id}"
                         cover_url = item.get('picUrl', '')
-                        artist_name = item.get('artist', {}).get('name', '')
-                        display_name = f"{item_name} - {artist_name}"
+                        artist = item.get('artist', {}).get('name', '未知歌手') if item.get('artist') else '未知歌手'
+                        display_name = f"[专辑▶] {item_name} - {artist}"
+                    elif search_key == SEARCH_TYPE_ARTIST:
+                        media_uri = f"cloudmusic://163/artist/playlist?id={item_id}"
+                        cover_url = item.get('picUrl', '')
+                        display_name = f"[歌手▶] {item_name} (热门歌曲)"
                     else:  # SEARCH_TYPE_RADIO
-                        media_uri = f"cloudmusic://163/djradio/{item_id}"
+                        media_uri = f"cloudmusic://163/radio/playlist?id={item_id}"
                         cover_url = item.get('picUrl', '')
-                        display_name = item_name
+                        display_name = f"[电台▶] {item_name}"
                     
                     # 存储为字典格式（包含媒体库URI）
                     item_info = {

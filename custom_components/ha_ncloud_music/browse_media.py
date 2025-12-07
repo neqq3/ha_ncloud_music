@@ -60,6 +60,7 @@ class CloudMusicRouter():
 
     toplist = f'{cloudmusic_protocol}toplist'
     playlist = f'{cloudmusic_protocol}playlist'
+    album_playlist = f'{cloudmusic_protocol}album/playlist'
     radio_playlist = f'{cloudmusic_protocol}radio/playlist'
     artist_playlist = f'{cloudmusic_protocol}artist/playlist'
 
@@ -744,6 +745,8 @@ async def async_play_media(media_player, cloud_music, media_content_id):
         playlist = await cloud_music.async_get_ilinkSongs()
     elif media_content_id.startswith(CloudMusicRouter.my_cloud):
         playlist = await cloud_music.async_get_cloud()
+    elif media_content_id.startswith(CloudMusicRouter.album_playlist):
+        playlist = await cloud_music.async_get_album(id)
     elif media_content_id.startswith(CloudMusicRouter.artist_playlist):
         playlist = await cloud_music.async_get_artists(id)
     elif media_content_id.startswith(CloudMusicRouter.radio_playlist):

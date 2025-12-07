@@ -127,10 +127,16 @@ class CloudMusicSearchResults(SelectEntity):
             new_music_map = {}
             
             for item in music_list:
+                # 检查是否是提示项
+                if isinstance(item, dict) and item.get('is_hint'):
+                    option_text = item.get('name', '')
                 # 检查是 MusicInfo 对象还是字典
-                if hasattr(item, 'singer'):  # MusicInfo 对象（歌曲）
-                    option_text = f"{item.singer} - {item.song}"
+                elif hasattr(item, 'singer'):  # MusicInfo 对象（歌曲）
+                    # 优化歌曲显示格式：歌名 - 歌手 [专辑]
+                    album_part = f" [{item.album}]" if item.album else ""
+                    option_text = f"{item.song} - {item.singer}{album_part}"
                 else:  # 字典（歌单/歌手/专辑/电台）
+                    # 已在button.py中格式化好，直接使用
                     option_text = item.get('name', '未知')
                 new_options.append(option_text)
                 new_music_map[option_text] = item
@@ -154,9 +160,9 @@ class CloudMusicSearchResults(SelectEntity):
         self._attr_current_option = option
         self.async_write_ha_state()
 
-        # 检查是否是占位符选项
-        if option.startswith("未找到") or option == "暂无搜索结果":
-            _LOGGER.debug(f"选择了占位符选项: {option}")
+        # 检查是否是占位符或提示选项
+        if option.startswith("未找到") or option == "暂无搜索结果" or option.startswith("🔍"):
+            _LOGGER.debug(f"选择了提示/占位符选项: {option}")
             return
 
         # 从映射中获取对应的 MusicInfo
@@ -211,6 +217,11 @@ class CloudMusicSearchResults(SelectEntity):
                     media_player_obj = entity
                     break
 
+        # 检查是否是提示项（hint）
+        if isinstance(music_info, dict) and music_info.get('is_hint'):
+            _LOGGER.info("用户点击了提示项，不执行任何操作")
+            return
+        
         # 检查item类型：MusicInfo对象还是字典
         if hasattr(music_info, 'singer'):  # MusicInfo 对象 - 直接播放歌曲
             _LOGGER.info(f"准备播放歌曲: {music_info.song} - {music_info.singer}")
@@ -246,8 +257,10 @@ class CloudMusicSearchResults(SelectEntity):
                         "title": "云音乐播放错误"
                     }
                 )
-        else:  # 字典 - 打开媒体库浏览
+        else:  # 字典 - 播放整个歌单/专辑/电台
             media_uri = music_info.get('media_uri', '')
+            item_type = music_info.get('type', '')
+            item_name = music_info.get('name', '')
             item_name = music_info.get('name', '未知')
             _LOGGER.info(f"准备打开媒体库: {item_name} -> {media_uri}")
             
@@ -271,7 +284,7 @@ class CloudMusicSearchResults(SelectEntity):
                     "persistent_notification",
                     "create",
                     {
-                        "message": f"打开媒体库失败: {str(e)}",
+                        "message": f"播放失败: {str(e)}",
                         "title": "云音乐错误"
                     }
                 )

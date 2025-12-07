@@ -173,6 +173,23 @@ class CloudMusic():
 
         return list(map(format_playlist, res['songs']))
 
+    # 获取专辑列表
+    async def async_get_album(self, album_id):
+        res = await self.netease_cloud_music(f'/album?id={album_id}')
+        
+        def format_album(item):
+            id = item['id']
+            song = item['name']
+            singer = item['ar'][0].get('name', '') if item.get('ar') else '未知歌手'
+            album = item['al']['name'] if item.get('al') else ''
+            duration = item['dt']
+            url = self.get_play_url(id, song, singer, MusicSource.PLAYLIST.value)
+            picUrl = item['al'].get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg') if item.get('al') else ''
+            music_info = MusicInfo(id, song, singer, album, duration, url, picUrl, MusicSource.PLAYLIST.value)
+            return music_info
+        
+        return list(map(format_album, res['songs']))
+
     # 获取电台列表
     async def async_get_djradio(self, rid):
         res = await self.netease_cloud_music(f'/dj/program?rid={rid}&limit=200')
