@@ -140,6 +140,8 @@ class CloudMusicSearchResults(SelectEntity):
         
         这是核心交互逻辑：选择即播放，无需二次确认。
         """
+        # 保存选中的选项
+        selected_option = option
         self._attr_current_option = option
         self.async_write_ha_state()
 
@@ -182,10 +184,32 @@ class CloudMusicSearchResults(SelectEntity):
             )
             return
 
-        # 调用媒体播放器播放歌曲
-        _LOGGER.info(f"播放选中歌曲: {music_info.song} - {music_info.singer} (URL: {music_info.url})")
+        # 获取 media_player 实体对象（用于设置 playlist）
+        cloud_music = self.hass.data.get('cloud_music')
+        if cloud_music is None:
+            _LOGGER.error("CloudMusic 实例未找到")
+            return
+
+        # 查找 media_player 实体对象
+        media_player_obj = None
+        for entity in self.hass.data.get('entity_components', {}).get(MEDIA_PLAYER_DOMAIN, []):
+            if entity.entity_id == media_player_entity_id:
+                media_player_obj = entity
+                break
+
+        # 使用原作者的 playlist 机制播放
+        # 这样可以保留封面图、歌词等信息，并加入播放列表
+        _LOGGER.info(f"准备播放选中歌曲: {music_info.song} - {music_info.singer}")
         try:
-            # 使用歌曲的播放 URL
+            # 设置 media_player 的 playlist 和 playindex
+            # 注意：这里只设置单首歌曲，不是整个搜索结果
+            if media_player_obj:
+                media_player_obj.playlist = [music_info]
+                media_player_obj.playindex = 0
+                _LOGGER.debug(f"已设置 playlist: {music_info.song}")
+
+            # 使用 media_player 的 async_play_media 方法
+            # 传入 URL 让它使用我们刚设置的 playlist
             await self.hass.services.async_call(
                 MEDIA_PLAYER_DOMAIN,
                 'play_media',
@@ -198,14 +222,10 @@ class CloudMusicSearchResults(SelectEntity):
             )
             _LOGGER.info(f"开始播放: {music_info.singer} - {music_info.song}")
             
-            # 可选：显示友好通知
-            await self.hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "message": f"正在播放: {music_info.singer} - {music_info.song}",
-                    "title": "云音乐播放"
-                }
+            # 重置选择以允许重复播放同一首歌
+            # 延迟1秒后重置，给用户视觉反馈
+            await self.hass.async_add_executor_job(
+                lambda: self.hass.loop.call_later(1, self._reset_selection, selected_option)
             )
             
         except Exception as e:
@@ -218,3 +238,15 @@ class CloudMusicSearchResults(SelectEntity):
                     "title": "云音乐播放错误"
                 }
             )
+
+    def _reset_selection(self, previous_option: str) -> None:
+        """重置选择以允许重复播放
+        
+        将当前选项重置，使用户可以再次选择同一首歌。
+        """
+        if self._attr_current_option == previous_option:
+            # 如果选择没有变化，重置为第一个选项
+            if self._attr_options and len(self._attr_options) > 0:
+                self._attr_current_option = self._attr_options[0]
+                self.schedule_update_ha_state()
+                _LOGGER.debug(f"重置选择以允许重播: {previous_option}")
