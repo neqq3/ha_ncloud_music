@@ -225,10 +225,6 @@ class CloudMusicSearchButton(CloudMusicButton):
                     item_id = item['id']
                     item_name = item['name']
                     
-                    # DEBUG: 电台名称调试
-                    if search_key == SEARCH_TYPE_RADIO:
-                        _LOGGER.debug(f"电台原始数据: id={item_id}, name={item_name}")
-                    
                     # 根据类型构建媒体库URI和显示名称
                     if search_key == SEARCH_TYPE_PLAYLIST:
                         media_uri =f"cloudmusic://163/playlist?id={item_id}&title={quote(item_name)}"
@@ -259,9 +255,6 @@ class CloudMusicSearchButton(CloudMusicButton):
                         'cover': cover_url,
                     }
                     music_list.append(item_info)
-                    
-                    # DEBUG: 详细记录每条结果
-                    _LOGGER.debug(f"添加搜索结果 #{len(music_list)}: name='{display_name}', uri='{media_uri[:80]}...'")
                     
             _LOGGER.info(f"已格式化 {len(music_list)} 条{item_type_name}结果")
 
