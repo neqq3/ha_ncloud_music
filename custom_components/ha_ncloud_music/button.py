@@ -104,18 +104,28 @@ class CloudMusicSearchButton(CloudMusicButton):
             )
             return
 
-        # 2. 获取 CloudMusic API 实例
+        # 2. 读取搜索类型
+        type_entity_id = f"select.{DOMAIN}_{ENTITY_NAME_SEARCH_TYPE}"
+        type_state = self.hass.states.get(type_entity_id)
+        search_type_name = type_state.state if type_state else "歌曲"
+        
+        # 获取 API 参数
+        search_config = SEARCH_TYPE_MAP.get(search_type_name, SEARCH_TYPE_MAP["歌曲"])
+        api_type = search_config["type"]
+        search_key = search_config["key"]
+
+        # 3. 获取 CloudMusic API 实例
         cloud_music = self.hass.data.get('cloud_music')
         if cloud_music is None:
             _LOGGER.error("CloudMusic 实例未找到")
             return
 
         # 3. 调用搜索 API
-        _LOGGER.info(f"开始搜索: {keyword}")
+        _LOGGER.info(f"开始搜索: 类型={search_type_name}, 关键词={keyword}")
         try:
             # 调用原作者的搜索接口（参考 browse_media.py 第763行）
             # 这里使用网易云音乐的搜索接口
-            res = await cloud_music.netease_cloud_music(f'/cloudsearch?limit=20&keywords={keyword}')
+            res = await cloud_music.netease_cloud_music(f'/cloudsearch?keywords={keyword}&type={api_type}&limit=20')
             
             if res.get('code') != 200:
                 _LOGGER.warning(f"搜索 API 返回异常: {res}")
@@ -137,6 +147,7 @@ class CloudMusicSearchButton(CloudMusicButton):
                 search_data_key = f'{DOMAIN}_{self._entry.entry_id}_search_data'
                 self.hass.data[search_data_key][DATA_SEARCH_RESULTS] = []
                 self.hass.data[search_data_key][DATA_KEYWORD] = keyword
+                self.hass.data[search_data_key][DATA_SEARCH_TYPE] = search_key
                 self.hass.data[search_data_key][DATA_LAST_UPDATE] = time.time()
                 
                 await self.hass.services.async_call(
@@ -171,6 +182,7 @@ class CloudMusicSearchButton(CloudMusicButton):
             search_data_key = f'{DOMAIN}_{self._entry.entry_id}_search_data'
             self.hass.data[search_data_key][DATA_SEARCH_RESULTS] = music_list
             self.hass.data[search_data_key][DATA_KEYWORD] = keyword
+            self.hass.data[search_data_key][DATA_SEARCH_TYPE] = search_key
             self.hass.data[search_data_key][DATA_LAST_UPDATE] = time.time()
 
             _LOGGER.info(f"搜索成功，找到 {len(music_list)} 首歌曲")

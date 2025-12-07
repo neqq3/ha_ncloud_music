@@ -13,9 +13,12 @@ from datetime import timedelta
 
 from .const import (
     ENTITY_NAME_SEARCH_RESULTS,
+    ENTITY_NAME_SEARCH_TYPE,
     DATA_SEARCH_RESULTS,
     DATA_LAST_UPDATE,
     DATA_KEYWORD,
+    DATA_SEARCH_TYPE,
+    SEARCH_TYPE_MAP,
 )
 from .manifest import manifest
 
@@ -30,7 +33,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """设置 select 实体平台"""
-    async_add_entities([CloudMusicSearchResults(hass, entry)])
+    async_add_entities([
+        CloudMusicSearchResults(hass, entry),
+        CloudMusicSearchType(hass, entry),  # 新增：搜索类型选择器
+    ])
 
 
 class CloudMusicSearchResults(SelectEntity):
@@ -238,3 +244,40 @@ class CloudMusicSearchResults(SelectEntity):
                     "title": "云音乐播放错误"
                 }
             )
+
+
+class CloudMusicSearchType(SelectEntity):
+    """云音乐搜索类型选择器
+    
+    允许用户选择搜索类型：歌曲、歌手、歌单、电台。
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """初始化搜索类型选择器"""
+        self.hass = hass
+        self._entry = entry
+        self._attr_name = f"{manifest.name} 搜索类型"
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{ENTITY_NAME_SEARCH_TYPE}"
+        self.entity_id = f"select.{DOMAIN}_{ENTITY_NAME_SEARCH_TYPE}"
+        self._attr_icon = "mdi:format-list-bulleted-type"
+        
+        # 选项列表：歌曲、歌手、歌单、电台
+        self._attr_options = list(SEARCH_TYPE_MAP.keys())
+        self._attr_current_option = "歌曲"  # 默认搜索歌曲
+
+    @property
+    def device_info(self):
+        """返回设备信息"""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": manifest.name,
+            "manufacturer": "shaonianzhentan",
+            "model": "Cloud Music",
+            "sw_version": manifest.version,
+        }
+
+    async def async_select_option(self, option: str) -> None:
+        """用户选择搜索类型"""
+        self._attr_current_option = option
+        self.async_write_ha_state()
+        _LOGGER.info(f"搜索类型已变更为: {option}")
