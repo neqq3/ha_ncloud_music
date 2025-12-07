@@ -128,8 +128,15 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-<<<<<<< HEAD
+# IDE
 .vscode/
-=======
-.vscode/
->>>>>>> dev
+
+# SSH keys - DO NOT COMMIT
+ha_ssh_key
+ha_ssh_key.pub
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub

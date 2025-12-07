@@ -134,7 +134,7 @@ class CloudMusicSearchButton(CloudMusicButton):
         try:
             # 使用 /cloudsearch API（文档说明它比 /search 更全）
             # 支持 type 参数：1=单曲, 10=专辑, 100=歌手, 1000=歌单, 1009=电台
-            res = await cloud_music.netease_cloud_music(f'/cloudsearch?keywords={keyword}&type={api_type}&limit=20')
+            res = await cloud_music.netease_cloud_music(f'/cloudsearch?keywords={keyword}&type={api_type}&limit=50')
             
             if res.get('code') != 200:
                 _LOGGER.warning(f"搜索 API 返回异常: {res}")
@@ -202,7 +202,7 @@ class CloudMusicSearchButton(CloudMusicButton):
                     'is_hint': True
                 })
                 
-                for item in items[:20]:
+                for item in items[:50]:
                     song_id = item['id']
                     song_name = item['name']
                     singer_name = item['ar'][0]['name'] if item.get('ar') else '未知歌手'
@@ -221,7 +221,7 @@ class CloudMusicSearchButton(CloudMusicButton):
                     'is_hint': True
                 })
                 
-                for item in items[:20]:
+                for item in items[:50]:
                     item_id = item['id']
                     item_name = item['name']
                     

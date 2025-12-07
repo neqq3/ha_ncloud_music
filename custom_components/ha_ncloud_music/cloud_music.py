@@ -182,11 +182,22 @@ class CloudMusic():
             return []
         
         # 批量获取歌曲详情以获取准确的封面
-        song_ids = ','.join(str(song['id']) for song in songs)
-        detail_res = await self.netease_cloud_music(f'/song/detail?ids={song_ids}')
+        # 使用分批策略防止URL过长（414错误）
+        BATCH_SIZE = 500  # 每批500个ID，约5.5KB，安全范围内
+        song_details = {}
+        all_song_ids = [str(song['id']) for song in songs]
         
-        # 创建ID到详情的映射
-        song_details = {song['id']: song for song in detail_res.get('songs', [])}
+        for i in range(0, len(all_song_ids), BATCH_SIZE):
+            batch_ids = all_song_ids[i:i + BATCH_SIZE]
+            ids_str = ','.join(batch_ids)
+            
+            try:
+                detail_res = await self.netease_cloud_music(f'/song/detail?ids={ids_str}')
+                if detail_res and 'songs' in detail_res:
+                    for song in detail_res['songs']:
+                        song_details[song['id']] = song
+            except Exception as e:
+                _LOGGER.warning(f"Failed to fetch album cover details for batch {i}: {e}")
         
         def format_album(item):
             id = item['id']
@@ -207,7 +218,7 @@ class CloudMusic():
 
     # 获取电台列表
     async def async_get_djradio(self, rid):
-        res = await self.netease_cloud_music(f'/dj/program?rid={rid}&limit=200')
+        res = await self.netease_cloud_music(f'/dj/program?rid={rid}&limit=500')
 
         def format_playlist(item):
             mainSong = item['mainSong']
@@ -232,11 +243,22 @@ class CloudMusic():
             return []
         
         # 批量获取歌曲详情以获取准确的封面
-        song_ids = ','.join(str(song['id']) for song in hot_songs)
-        detail_res = await self.netease_cloud_music(f'/song/detail?ids={song_ids}')
+        # 使用分批策略防止URL过长（414错误）
+        BATCH_SIZE = 500
+        song_details = {}
+        all_song_ids = [str(song['id']) for song in hot_songs]
         
-        # 创建ID到详情的映射
-        song_details = {song['id']: song for song in detail_res.get('songs', [])}
+        for i in range(0, len(all_song_ids), BATCH_SIZE):
+            batch_ids = all_song_ids[i:i + BATCH_SIZE]
+            ids_str = ','.join(batch_ids)
+            
+            try:
+                detail_res = await self.netease_cloud_music(f'/song/detail?ids={ids_str}')
+                if detail_res and 'songs' in detail_res:
+                    for song in detail_res['songs']:
+                        song_details[song['id']] = song
+            except Exception as e:
+                _LOGGER.warning(f"Failed to fetch artist cover details for batch {i}: {e}")
 
         def format_playlist(item):
             id = item['id']
