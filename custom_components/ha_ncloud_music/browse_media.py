@@ -98,6 +98,8 @@ class CloudMusicRouter():
     play_xmly = f'{play_protocol}xmly'
     play_fm = f'{play_protocol}fm'
     
+    # 单首歌曲播放
+    single_song = f'{cloudmusic_protocol}single/song'
 
 
 async def async_browse_media(media_player, media_content_type, media_content_id):
@@ -277,10 +279,14 @@ async def async_browse_media(media_player, media_content_type, media_content_id)
             
             # 歌曲类型：MusicInfo对象
             if hasattr(item, 'singer'):
+                # 构造单曲播放协议 URL
+                song_id = item.id
+                media_uri = f'{CloudMusicRouter.single_song}?id={song_id}'
+                
                 library_info.children.append(
                     BrowseMedia(
                         media_class=MediaClass.TRACK,
-                        media_content_id=item.url,
+                        media_content_id=media_uri,
                         media_content_type=MediaType.MUSIC,
                         title=f'{item.song} - {item.singer}',
                         can_play=True,
@@ -1020,6 +1026,28 @@ async def async_play_media(media_player, cloud_music, media_content_id):
         playlist = await cloud_music.async_play_singer(keywords)
     elif media_content_id.startswith(CloudMusicRouter.play_xmly):
         playlist = await cloud_music.async_play_xmly(keywords)
+    elif media_content_id.startswith(CloudMusicRouter.single_song):
+        # 单首歌曲播放
+        song_id = query.get('id')
+        if song_id:
+            # 获取歌曲详情
+            result = await cloud_music.netease_cloud_music(f'/song/detail?ids={song_id}')
+            if result and result.get('songs'):
+                song_data = result['songs'][0]
+                from .models.music_info import MusicInfo, MusicSource
+                # 获取歌曲 URL
+                song_url, fee = await cloud_music.song_url(song_id)
+                music_info = MusicInfo(
+                    id=str(song_data['id']),
+                    song=song_data['name'],
+                    singer='/'.join([ar['name'] for ar in song_data.get('ar', [])]),
+                    album=song_data.get('al', {}).get('name', ''),
+                    duration=song_data.get('dt', 0) // 1000,
+                    url=song_url,
+                    picUrl=song_data.get('al', {}).get('picUrl', ''),
+                    source=MusicSource.URL
+                )
+                playlist = [music_info]
 
     if playlist is not None:
         media_player.playindex = playindex
