@@ -130,6 +130,7 @@ dmypy.json
 
 # IDE
 .vscode/
+*.code-workspace
 
 # SSH keys - DO NOT COMMIT
 ha_ssh_key
