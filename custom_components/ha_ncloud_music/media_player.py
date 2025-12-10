@@ -150,8 +150,9 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             self._attr_media_title = music_info.song
             self._attr_media_artist = music_info.singer
         
-        # 立即通知HA更新界面
-        self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
+        # 静默定时器：不再每秒通知 HA 更新界面
+        # 状态更新由切歌、播放、暂停等操作自动触发
+        # 这样可以避免数据库每秒写入，大幅降低系统负载
 
     @property
     def media_player(self):
@@ -189,21 +190,16 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
     @property
     def extra_state_attributes(self):
+        """返回额外状态属性 - 精简版
+        
+        移除了 next_tracks 以降低数据库负载。
+        歌词功能通过 API 接口 /lyric?id=xxx 提供。
+        """
         attributes = dict(self._attributes)
         
-        # 如果有播放列表，显示接下来的歌曲（队列）
-        if hasattr(self, 'playlist') and len(self.playlist) > 0:
-            # 如果开启随机，返回打乱后的列表作为 UI 展示用的 queue
-            if self._attr_shuffle and hasattr(self, '_playlist_active') and len(self._playlist_active) > 0:
-                # 从当前位置+1开始的接下来的歌曲
-                next_index = self._play_index + 1
-                if next_index < len(self._playlist_active):
-                    attributes['next_tracks'] = [song.song for song in self._playlist_active[next_index:next_index+10]]  # 显示接下来10首
-            else:
-                # 正常顺序
-                next_index = self.playindex + 1 if hasattr(self, 'playindex') else 0
-                if next_index < len(self.playlist):
-                    attributes['next_tracks'] = [song.song for song in self.playlist[next_index:next_index+10]]  # 显示接下来10首
+        # 保留 song_id 供 Layer 2 API 使用
+        if hasattr(self, '_current_song_id') and self._current_song_id:
+            attributes['song_id'] = self._current_song_id
         
         return attributes
 
@@ -259,16 +255,21 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             'media_content_type': 'music'
         })
         self._attr_state = STATE_PLAYING
-
+        
+        # 通知 HA 更新状态（播放新歌时立即刷新）
+        self.async_write_ha_state()
+        
         self.before_state = None
 
     async def async_media_play(self):
         self._attr_state = STATE_PLAYING
         await self.async_call('media_play')
+        self.async_write_ha_state()  # 通知 HA 更新状态
 
     async def async_media_pause(self):
         self._attr_state = STATE_PAUSED
         await self.async_call('media_pause')
+        self.async_write_ha_state()  # 通知 HA 更新状态
 
     async def async_set_repeat(self, repeat):
         self._attr_repeat = repeat

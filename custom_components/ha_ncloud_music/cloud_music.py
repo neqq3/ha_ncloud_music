@@ -136,6 +136,31 @@ class CloudMusic():
                     self.notification(f'请求数据失败，账号出现异常\n\ncode: {code} \nurl: {url} \n\n这种情况一般是接口问题，和插件没有关系')
         return res
 
+    async def async_get_lyric(self, song_id: str) -> dict:
+        """
+        获取歌词
+        
+        Args:
+            song_id: 网易云音乐歌曲ID
+        
+        Returns:
+            {'lrc': str, 'tlyric': str} 或 None
+        """
+        try:
+            res = await self.netease_cloud_music(f'/lyric/new?id={song_id}')
+            if res.get('code') == 200:
+                lrc_obj = res.get('lrc', {})
+                tlyric_obj = res.get('tlyric', {})
+                
+                return {
+                    'lrc': lrc_obj.get('lyric', ''),
+                    'tlyric': tlyric_obj.get('lyric', '')
+                }
+        except Exception as e:
+            _LOGGER.warning(f"获取歌词失败 (ID: {song_id}): {e}")
+        
+        return None
+
     # 获取音乐链接
     async def song_url(self, id):
         res = await self.netease_cloud_music(f'/song/url/v1?id={id}&level=standard')
