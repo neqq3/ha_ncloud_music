@@ -87,3 +87,57 @@ class HttpView(HomeAssistantView):
             return data.get('url')
         except Exception as ex:
             pass
+
+
+class CloudMusicApiView(HomeAssistantView):
+    """
+    统一 API 入口 (Layer 2 Proxy)
+    
+    解决问题：
+    1. 外网穿透 - 复用 HA 安全通道
+    2. CORS/HTTPS - 同源请求
+    3. 认证 - 自动携带 Cookie
+    
+    用法：
+        /cloud_music/api?action=lyric&id=123456
+        /cloud_music/api?action=song_detail&id=123456
+    """
+    
+    url = "/cloud_music/api"
+    name = "cloud_music:api"
+    requires_auth = False  # 前端卡片需要无认证访问
+
+    async def get(self, request):
+        hass = request.app["hass"]
+        cloud_music = hass.data.get('cloud_music')
+        
+        if cloud_music is None:
+            return web.json_response({'error': 'Cloud Music not initialized'}, status=503)
+        
+        action = request.query.get('action')
+        song_id = request.query.get('id')
+        
+        if not action:
+            return web.json_response({'error': 'Missing action parameter'}, status=400)
+        
+        # 歌词
+        if action == 'lyric':
+            if not song_id:
+                return web.json_response({'error': 'Missing id parameter'}, status=400)
+            result = await cloud_music.async_get_lyric(song_id)
+            # 总是返回结构化数据，前端根据 type 判断可用性
+            return web.json_response(result)
+        
+        # 歌曲详情（预留）
+        elif action == 'song_detail':
+            if not song_id:
+                return web.json_response({'error': 'Missing id parameter'}, status=400)
+            result = await cloud_music.netease_cloud_music(f'/song/detail?ids={song_id}')
+            return web.json_response(result)
+        
+        # 未知 action
+        else:
+            return web.json_response({
+                'error': f'Unknown action: {action}',
+                'available_actions': ['lyric', 'song_detail']
+            }, status=400)

@@ -139,28 +139,50 @@ class CloudMusic():
 
     async def async_get_lyric(self, song_id: str) -> dict:
         """
-        获取歌词
+        获取歌词（支持多种格式 + Fallback）
+        
+        歌词优先级：yrc (逐字) > lrc (普通) > 无歌词
         
         Args:
             song_id: 网易云音乐歌曲ID
         
         Returns:
-            {'lrc': str, 'tlyric': str} 或 None
+            {
+                'yrc': str,      # 逐字歌词（可能为空）
+                'lrc': str,      # 普通歌词
+                'tlyric': str,   # 翻译歌词
+                'type': str      # 'yrc' | 'lrc' | 'none' - 最佳可用类型
+            }
         """
         try:
             res = await self.netease_cloud_music(f'/lyric/new?id={song_id}')
             if res.get('code') == 200:
+                yrc_obj = res.get('yrc', {})
                 lrc_obj = res.get('lrc', {})
                 tlyric_obj = res.get('tlyric', {})
                 
+                yrc = yrc_obj.get('lyric', '')
+                lrc = lrc_obj.get('lyric', '')
+                tlyric = tlyric_obj.get('lyric', '')
+                
+                # 判断最佳可用类型
+                if yrc:
+                    lyric_type = 'yrc'
+                elif lrc:
+                    lyric_type = 'lrc'
+                else:
+                    lyric_type = 'none'
+                
                 return {
-                    'lrc': lrc_obj.get('lyric', ''),
-                    'tlyric': tlyric_obj.get('lyric', '')
+                    'yrc': yrc,
+                    'lrc': lrc,
+                    'tlyric': tlyric,
+                    'type': lyric_type
                 }
         except Exception as e:
             _LOGGER.warning(f"获取歌词失败 (ID: {song_id}): {e}")
         
-        return None
+        return {'yrc': '', 'lrc': '', 'tlyric': '', 'type': 'none'}
 
     # 获取音乐链接（智能兜底模式）
     async def song_url(self, id, level=None):

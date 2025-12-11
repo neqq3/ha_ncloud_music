@@ -6,7 +6,7 @@ from homeassistant.const import CONF_URL
 import asyncio
 from .const import PLATFORMS
 from .manifest import manifest
-from .http import HttpView
+from .http import HttpView, CloudMusicApiView
 from .cloud_music import CloudMusic
 
 DOMAIN = manifest.domain
@@ -35,6 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     hass.http.register_view(HttpView)
+    hass.http.register_view(CloudMusicApiView)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(update_listener))
     return True
