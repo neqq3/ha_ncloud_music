@@ -1,0 +1,16 @@
+{
+    "services": {
+        "search": {
+            "service": "mdi:magnify"
+        },
+        "play_by_id": {
+            "service": "mdi:play-circle"
+        },
+        "play_daily": {
+            "service": "mdi:calendar-star"
+        },
+        "play_favorites": {
+            "service": "mdi:heart-multiple"
+        }
+    }
+}
