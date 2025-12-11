@@ -1,0 +1,101 @@
+# 网易云音乐 HA 集成 - 服务定义
+# 这些服务为自动化和 AI 语音控制提供直接接口
+
+search:
+  name: 搜索音乐
+  description: 搜索并播放音乐、歌手、歌单或电台。支持 AI 语音控制和自动化脚本。
+  fields:
+    keyword:
+      name: 关键词
+      description: 搜索关键词
+      required: true
+      example: "歌曲名或歌手名"
+      selector:
+        text:
+    type:
+      name: 搜索类型
+      description: 搜索内容类型
+      required: false
+      default: "song"
+      example: "song"
+      selector:
+        select:
+          options:
+            - label: "歌曲"
+              value: "song"
+            - label: "歌手"
+              value: "artist"
+            - label: "歌单"
+              value: "playlist"
+            - label: "电台"
+              value: "djradio"
+            - label: "专辑"
+              value: "album"
+    entity_id:
+      name: 播放器
+      description: 目标媒体播放器（可选，默认使用集成创建的播放器）
+      required: false
+      selector:
+        entity:
+          domain: media_player
+
+play_by_id:
+  name: 按 ID 播放
+  description: 通过网易云 ID 精准播放歌曲、歌单、专辑或电台。
+  fields:
+    id:
+      name: 资源 ID
+      description: 网易云音乐的资源 ID
+      required: true
+      example: "25724904"
+      selector:
+        text:
+    type:
+      name: 资源类型
+      description: 资源类型
+      required: true
+      example: "playlist"
+      selector:
+        select:
+          options:
+            - label: "歌曲"
+              value: "song"
+            - label: "歌单"
+              value: "playlist"
+            - label: "专辑"
+              value: "album"
+            - label: "歌手"
+              value: "artist"
+            - label: "电台"
+              value: "djradio"
+    entity_id:
+      name: 播放器
+      description: 目标媒体播放器（可选，默认使用集成创建的播放器）
+      required: false
+      selector:
+        entity:
+          domain: media_player
+
+play_daily:
+  name: 播放每日推荐
+  description: 播放每日推荐歌单
+  fields:
+    entity_id:
+      name: 播放器
+      description: 目标媒体播放器（可选）
+      required: false
+      selector:
+        entity:
+          domain: media_player
+
+play_favorites:
+  name: 播放我喜欢的音乐
+  description: 播放用户的"我喜欢的音乐"歌单
+  fields:
+    entity_id:
+      name: 播放器
+      description: 目标媒体播放器（可选）
+      required: false
+      selector:
+        entity:
+          domain: media_player

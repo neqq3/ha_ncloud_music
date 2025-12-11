@@ -154,3 +154,6 @@ supervisor_token
 
 # Development scripts - DO NOT COMMIT
 migration/
+
+# Development notes - DO NOT COMMIT
+.ha_dev/
