@@ -1,7 +1,7 @@
 {
     "domain": "ha_ncloud_music",
     "name": "\u4E91\u97F3\u4E50",
-    "version": "2025.12.09",
+    "version": "2025.12.12.01",
     "config_flow": true,
     "documentation": "https://github.com/shaonianzhentan/ha_cloud_music",
     "requirements": [
