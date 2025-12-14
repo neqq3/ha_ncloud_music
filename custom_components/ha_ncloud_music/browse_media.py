@@ -85,6 +85,10 @@ class CloudMusicRouter():
     # FM
     fm_channel = f'{fm_protocol}channel'
     fm_playlist = f'{fm_protocol}playlist'
+    
+    # 私人 FM
+    personal_fm = f'{cloudmusic_protocol}personal_fm'
+    personal_fm_play = f'{cloudmusic_protocol}personal_fm/play'
 
     # 搜索名称
     search_name = f'{search_protocol}name'
@@ -155,6 +159,11 @@ async def async_browse_media(media_player, media_content_type, media_content_id)
                     'title': '每日推荐歌曲',
                     'path': CloudMusicRouter.my_daily,
                     'type': MediaType.MUSIC
+                },{
+                    'title': '私人 FM',
+                    'path': CloudMusicRouter.personal_fm,
+                    'type': MediaType.MUSIC,
+                    'thumbnail': 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg'
                 },{
                     'title': '每日推荐歌单',
                     'path': CloudMusicRouter.my_recommend_resource,
@@ -434,6 +443,31 @@ async def async_browse_media(media_player, media_content_type, media_content_id)
                     can_play=True,
                     can_expand=False,
                     thumbnail=music_info.thumbnail
+                )
+            )
+        return library_info
+    if media_content_id.startswith(CloudMusicRouter.personal_fm):
+        # 私人 FM 模式列表
+        from .const import FM_MODES
+        library_info = BrowseMedia(
+            media_class=MediaClass.DIRECTORY,
+            media_content_id=media_content_id,
+            media_content_type=MediaType.CHANNEL,
+            title='私人 FM',
+            can_play=False,
+            can_expand=False,
+            children=[],
+        )
+        # 显示所有 FM 模式
+        for mode_name in FM_MODES.keys():
+            library_info.children.append(
+                BrowseMedia(
+                    title=f'📻 {mode_name}',
+                    media_class=MediaClass.MUSIC,
+                    media_content_type=MediaType.MUSIC,
+                    media_content_id=f"{CloudMusicRouter.personal_fm_play}?mode={quote(mode_name)}",
+                    can_play=True,
+                    can_expand=False,
                 )
             )
         return library_info
@@ -1026,7 +1060,12 @@ async def async_play_media(media_player, cloud_music, media_content_id):
         
         return 'index'
 
-    if media_content_id.startswith(CloudMusicRouter.playlist):
+    if media_content_id.startswith(CloudMusicRouter.personal_fm_play):
+        # 私人 FM 播放：调用 media_player 的 async_play_fm
+        mode_name = query.get('mode', '默认推荐')
+        await media_player.async_play_fm(mode_name)
+        return 'fm'  # 特殊返回值，不设置 playlist
+    elif media_content_id.startswith(CloudMusicRouter.playlist):
         playlist = await cloud_music.async_get_playlist(id)
     elif media_content_id.startswith(CloudMusicRouter.my_daily):
         playlist = await cloud_music.async_get_dailySongs()
