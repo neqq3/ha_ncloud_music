@@ -35,10 +35,9 @@ class CloudMusic():
         self.async_media_next_track = async_media_next_track
 
         self.userinfo = {}
-        # 读取用户信息
+        # 读取用户信息（延迟到第一次访问时加载，避免阻塞事件循环）
         self.userinfo_filepath = self.get_storage_dir('cloud_music.userinfo')
-        if os.path.exists(self.userinfo_filepath):
-            self.userinfo = load_json(self.userinfo_filepath)
+        self._userinfo_loaded = False
         # 登录二维码
         self.login_qrcode = {
             'key': None,
@@ -48,6 +47,17 @@ class CloudMusic():
 
     def get_storage_dir(self, file_name):
         return os.path.abspath(f'{STORAGE_DIR}/{file_name}')
+
+    async def _ensure_userinfo_loaded(self):
+        """延迟加载 userinfo，避免阻塞事件循环"""
+        if self._userinfo_loaded:
+            return
+        self._userinfo_loaded = True
+        if os.path.exists(self.userinfo_filepath):
+            # 在后台线程执行文件读取
+            self.userinfo = await self.hass.async_add_executor_job(
+                load_json, self.userinfo_filepath
+            )
 
     def netease_image_url(self, url, size=200):
         return f'{url}?param={size}y{size}'
@@ -126,6 +136,8 @@ class CloudMusic():
 
     # 云音乐接口
     async def netease_cloud_music(self, url):
+        # 确保 userinfo 已加载
+        await self._ensure_userinfo_loaded()
         res = await http_get(self.api_url + url, self.userinfo.get('cookie', {}))
         code = res.get('code')
         if code != 200 and code != 801:
@@ -658,3 +670,106 @@ class CloudMusic():
             return MusicInfo(songId, song, singer, album, 0, audio_url, pic, MusicSource.URL.value)
         except Exception as ex:
             print(ex)
+
+    # ==================== 私人 FM 相关 API ====================
+
+    async def async_get_personal_fm(self) -> list:
+        """
+        获取私人 FM 歌曲（默认模式）
+        
+        Returns:
+            MusicInfo 列表（通常返回 3 首歌曲）
+        """
+        return await self.async_get_personal_fm_mode("DEFAULT")
+
+    async def async_get_personal_fm_mode(self, mode: str, submode: str = None, count: int = 3) -> list:
+        """
+        按模式获取私人 FM 歌曲
+        
+        Args:
+            mode: FM 模式 (DEFAULT, aidj, FAMILIAR, EXPLORE, SCENE_RCMD)
+            submode: 场景子模式 (EXERCISE, FOCUS, NIGHT_EMO)，仅当 mode=SCENE_RCMD 时有效
+            count: 期望获取的歌曲数量（默认3首，如需更多会多次调用API）
+        
+        Returns:
+            MusicInfo 列表
+        """
+        try:
+            import time
+            # 构建 API URL（添加时间戳绕过缓存）
+            timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+            url = f'/personal/fm/mode?mode={mode}&timestamp={timestamp}'
+            if submode:
+                url += f'&submode={submode}'
+            
+            # 格式化为 MusicInfo
+            def format_fm_song(item):
+                id = item['id']
+                song = item['name']
+                artists = item.get('artists', [])
+                singer = artists[0].get('name', '未知歌手') if artists else '未知歌手'
+                album_info = item.get('album', {})
+                album = album_info.get('name', '')
+                picUrl = album_info.get('picUrl', 'https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg')
+                duration = item.get('duration', 0)
+                url = self.get_play_url(id, song, singer, MusicSource.PLAYLIST.value)
+                music_info = MusicInfo(id, song, singer, album, duration, url, picUrl, MusicSource.PLAYLIST.value)
+                return music_info
+            
+            # 收集歌曲（去重）
+            result = []
+            seen_ids = set()
+            max_attempts = max(count // 3 + 1, 2)  # API 每次返回约3首
+            
+            for attempt in range(max_attempts):
+                if len(result) >= count:
+                    break
+                    
+                res = await self.netease_cloud_music(url)
+                
+                if res.get('code') != 200:
+                    _LOGGER.warning(f"获取私人 FM 失败: {res}")
+                    break
+                
+                songs = res.get('data', [])
+                new_count = 0
+                for song in songs:
+                    song_id = song['id']
+                    if song_id not in seen_ids:
+                        seen_ids.add(song_id)
+                        result.append(format_fm_song(song))
+                        new_count += 1
+                
+                # 如果没有获取到新歌，停止尝试（API 返回了相同的歌曲）
+                if new_count == 0:
+                    _LOGGER.debug(f"FM API 第 {attempt+1} 次调用没有返回新歌，停止")
+                    break
+            
+            _LOGGER.info(f"私人 FM ({mode}/{submode}) 获取到 {len(result)} 首歌曲")
+            return result
+            
+        except Exception as e:
+            _LOGGER.error(f"获取私人 FM 异常: {e}")
+            return []
+
+    async def async_fm_trash(self, song_id: str) -> bool:
+        """
+        将歌曲移入垃圾桶（不喜欢）
+        
+        Args:
+            song_id: 歌曲 ID
+        
+        Returns:
+            是否成功
+        """
+        try:
+            res = await self.netease_cloud_music(f'/fm_trash?id={song_id}')
+            success = res.get('code') == 200
+            if success:
+                _LOGGER.info(f"歌曲 {song_id} 已移入 FM 垃圾桶")
+            else:
+                _LOGGER.warning(f"移入 FM 垃圾桶失败: {res}")
+            return success
+        except Exception as e:
+            _LOGGER.error(f"FM 垃圾桶 API 异常: {e}")
+            return False

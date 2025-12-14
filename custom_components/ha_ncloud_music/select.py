@@ -19,6 +19,11 @@ from .const import (
     DATA_KEYWORD,
     DATA_SEARCH_TYPE,
     SEARCH_TYPE_MAP,
+    # FM 相关
+    ENTITY_NAME_FM_MODE,
+    FM_MODE_OPTIONS,
+    DEFAULT_FM_MODE,
+    CONF_DEFAULT_PLAYER,
 )
 from .manifest import manifest
 
@@ -35,7 +40,8 @@ async def async_setup_entry(
     """设置 select 实体平台"""
     async_add_entities([
         CloudMusicSearchResults(hass, entry),
-        CloudMusicSearchType(hass, entry),  # 新增：搜索类型选择器
+        CloudMusicSearchType(hass, entry),
+        CloudMusicFMMode(hass, entry),  # 单例 FM 模式选择器
     ])
 
 
@@ -325,3 +331,104 @@ class CloudMusicSearchType(SelectEntity):
         self._attr_current_option = option
         self.async_write_ha_state()
         _LOGGER.info(f"搜索类型已变更为: {option}")
+
+
+class CloudMusicFMMode(SelectEntity):
+    """私人 FM 模式选择器（单例全局实体）
+    
+    方案 D 实现：全局单一实体，动态查找目标播放器。
+    用户选择模式后立即开始播放私人 FM。
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """初始化 FM 模式选择器"""
+        self.hass = hass
+        self._entry = entry
+        
+        self._attr_name = f"{manifest.name} FM 模式"
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{ENTITY_NAME_FM_MODE}"
+        self.entity_id = f"select.{DOMAIN}_{ENTITY_NAME_FM_MODE}"
+        self._attr_icon = "mdi:radio"
+        
+        # 选项列表：7 种 FM 模式
+        self._attr_options = FM_MODE_OPTIONS
+        self._attr_current_option = DEFAULT_FM_MODE
+
+    @property
+    def device_info(self):
+        """返回设备信息"""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": manifest.name,
+            "manufacturer": "shaonianzhentan",
+            "model": "Cloud Music",
+            "sw_version": manifest.version,
+        }
+
+    def _find_first_ncloud_player(self):
+        """
+        动态查找目标云音乐播放器
+        
+        策略：
+        1. 优先使用用户配置的默认播放器
+        2. 如果未配置，返回第一个初始化成功的 CloudMusicMediaPlayer
+        """
+        # 读取用户配置的默认播放器
+        default_player_source = self._entry.options.get(CONF_DEFAULT_PLAYER, "")
+        
+        entity_registry = self.hass.data.get("entity_components", {}).get(MEDIA_PLAYER_DOMAIN)
+        if not entity_registry:
+            return None
+        
+        first_available = None
+        for entity in entity_registry.entities:
+            if hasattr(entity, '_is_fm_playing'):  # CloudMusicMediaPlayer 特征
+                # 记录第一个可用的（作为兆底）
+                if first_available is None:
+                    first_available = entity
+                # 如果配置了默认播放器，检查是否匹配
+                if default_player_source and entity.source_media_player == default_player_source:
+                    return entity
+        
+        # 未配置或未找到配置的播放器，返回第一个可用的
+        return first_available
+
+    async def async_select_option(self, option: str) -> None:
+        """用户选择 FM 模式 - 立即开始播放"""
+        self._attr_current_option = option
+        self.async_write_ha_state()
+        
+        # 占位符选项不执行
+        if option == DEFAULT_FM_MODE:
+            return
+        
+        # 动态查找目标播放器
+        media_player_obj = self._find_first_ncloud_player()
+        
+        if media_player_obj is None:
+            _LOGGER.warning("未找到可用的云音乐媒体播放器")
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": "未找到可用的云音乐播放器，请先配置媒体播放器",
+                    "title": "私人 FM"
+                }
+            )
+            return
+        
+        _LOGGER.info(f"🎵 FM 模式: {option} -> 目标播放器: {media_player_obj.entity_id}")
+        
+        # 调用 media_player 的 async_play_fm 方法
+        try:
+            await media_player_obj.async_play_fm(option)
+        except Exception as e:
+            _LOGGER.error(f"启动私人 FM 失败: {e}")
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": f"启动私人 FM 失败: {e}",
+                    "title": "私人 FM"
+                }
+            )

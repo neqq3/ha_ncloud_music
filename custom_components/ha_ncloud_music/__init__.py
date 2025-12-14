@@ -34,6 +34,16 @@ SERVICE_QUICK_PLAY_SCHEMA = vol.Schema({
     vol.Optional('entity_id'): cv.entity_id,
 })
 
+# FM 服务参数 Schema
+SERVICE_PLAY_FM_SCHEMA = vol.Schema({
+    vol.Optional('mode', default='默认推荐'): cv.string,
+    vol.Optional('entity_id'): cv.entity_id,
+})
+
+SERVICE_FM_TRASH_SCHEMA = vol.Schema({
+    vol.Optional('entity_id'): cv.entity_id,
+})
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
@@ -201,6 +211,74 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         target_entity_id = entity_id or player.entity_id
         await _play_media_uri(target_entity_id, 'cloudmusic://163/my/ilike')
     
+    async def _get_media_player_entity(entity_id: str = None):
+        """获取媒体播放器实体对象"""
+        entity_registry = hass.data.get("entity_components", {}).get('media_player')
+        if entity_registry:
+            for entity in entity_registry.entities:
+                if hasattr(entity, '_is_fm_playing'):  # CloudMusicMediaPlayer 特征
+                    if entity_id is None or entity.entity_id == entity_id:
+                        return entity
+        return None
+    
+    async def handle_play_fm(call: ServiceCall):
+        """
+        Service: ha_ncloud_music.play_fm
+        播放私人 FM
+        """
+        mode = call.data.get('mode', '默认推荐')
+        entity_id = call.data.get('entity_id')
+        
+        _LOGGER.info(f"🎵 Service Call: play_fm - mode='{mode}'")
+        
+        media_player_obj = await _get_media_player_entity(entity_id)
+        if not media_player_obj:
+            _LOGGER.error("找不到云音乐媒体播放器")
+            hass.components.persistent_notification.async_create(
+                f"播放私人 FM 失败：找不到播放器",
+                title="云音乐",
+                notification_id="ha_ncloud_music_error"
+            )
+            return
+        
+        try:
+            await media_player_obj.async_play_fm(mode)
+        except Exception as e:
+            _LOGGER.error(f"播放私人 FM 失败: {e}")
+            hass.components.persistent_notification.async_create(
+                f"播放私人 FM 失败：{e}",
+                title="云音乐",
+                notification_id="ha_ncloud_music_error"
+            )
+    
+    async def handle_fm_trash(call: ServiceCall):
+        """
+        Service: ha_ncloud_music.fm_trash
+        不喜欢当前歌曲并跳到下一首
+        """
+        entity_id = call.data.get('entity_id')
+        
+        _LOGGER.info("🗑️ Service Call: fm_trash")
+        
+        media_player_obj = await _get_media_player_entity(entity_id)
+        if not media_player_obj:
+            _LOGGER.error("找不到云音乐媒体播放器")
+            return
+        
+        if not media_player_obj._is_fm_playing:
+            _LOGGER.warning("当前不在 FM 模式，无法执行垃圾桶操作")
+            hass.components.persistent_notification.async_create(
+                "只有在私人 FM 模式下才能使用此功能",
+                title="FM 不喜欢",
+                notification_id="ha_ncloud_music_fm_trash"
+            )
+            return
+        
+        try:
+            await media_player_obj.async_fm_trash()
+        except Exception as e:
+            _LOGGER.error(f"FM 垃圾桶操作失败: {e}")
+    
     # 注册服务
     hass.services.async_register(
         DOMAIN, 'search', handle_search, schema=SERVICE_SEARCH_SCHEMA
@@ -214,8 +292,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(
         DOMAIN, 'play_favorites', handle_play_favorites, schema=SERVICE_QUICK_PLAY_SCHEMA
     )
+    hass.services.async_register(
+        DOMAIN, 'play_fm', handle_play_fm, schema=SERVICE_PLAY_FM_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, 'fm_trash', handle_fm_trash, schema=SERVICE_FM_TRASH_SCHEMA
+    )
     
-    _LOGGER.info("✅ 已注册 Service Call: search, play_by_id, play_daily, play_favorites")
+    _LOGGER.info("✅ 已注册 Service Call: search, play_by_id, play_daily, play_favorites, play_fm, fm_trash")
     
     return True
 
@@ -230,5 +314,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_remove(DOMAIN, 'play_by_id')
     hass.services.async_remove(DOMAIN, 'play_daily')
     hass.services.async_remove(DOMAIN, 'play_favorites')
+    hass.services.async_remove(DOMAIN, 'play_fm')
+    hass.services.async_remove(DOMAIN, 'fm_trash')
     
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

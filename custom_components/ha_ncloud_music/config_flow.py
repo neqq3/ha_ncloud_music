@@ -98,12 +98,38 @@ class OptionsFlowHandler(OptionsFlow):
         # 切歌时机选项 (自定义秒数)
         from .const import CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING
         current_timing = options.get(CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING)
+        
+        # 默认播放器选项（从已配置的云音乐播放器中选择）
+        from .const import CONF_DEFAULT_PLAYER
+        current_default_player = options.get(CONF_DEFAULT_PLAYER, "")
+        
+        # 构建已配置的云音乐播放器列表
+        cloud_music_players = []
+        for player_id in current_media_players:
+            # 尝试获取友好名称
+            state = self.hass.states.get(player_id)
+            if state:
+                friendly_name = state.attributes.get('friendly_name', player_id)
+                label = f'{friendly_name}'
+            else:
+                # 提取 entity_id 后半部分作为名称
+                label = player_id.split('.')[-1] if '.' in player_id else player_id
+            cloud_music_players.append({'label': label, 'value': player_id})
+        
+        # 添加「自动选择」选项
+        default_player_options = [{'label': '自动选择（第一个可用）', 'value': ''}] + cloud_music_players
 
         DATA_SCHEMA = vol.Schema({
             vol.Required('media_player', default=current_media_players): selector({
                 "select": {
                     "options": media_entities,
                     "multiple": True
+                }
+            }),
+            vol.Optional(CONF_DEFAULT_PLAYER, default=current_default_player): selector({
+                "select": {
+                    "options": default_player_options,
+                    "mode": "dropdown"
                 }
             }),
             vol.Required(CONF_AUDIO_QUALITY, default=current_quality): selector({

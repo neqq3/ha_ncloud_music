@@ -79,3 +79,33 @@ AUDIO_QUALITY_OPTIONS = {
 # 0：准时切歌
 CONF_NEXT_TRACK_TIMING = "next_track_timing"
 DEFAULT_NEXT_TRACK_TIMING = 0.0
+
+# ==================== 私人 FM 相关 ====================
+# FM 模式映射：显示名称 -> (mode, submode)
+FM_MODES = {
+    "默认推荐": ("DEFAULT", None),
+    "AI DJ": ("aidj", None),
+    "熟悉的歌": ("FAMILIAR", None),
+    "探索新歌": ("EXPLORE", None),
+    "运动模式": ("SCENE_RCMD", "EXERCISE"),
+    "专注模式": ("SCENE_RCMD", "FOCUS"),
+    "夜晚情绪": ("SCENE_RCMD", "NIGHT_EMO"),
+}
+
+# FM 模式列表（用于 Select 实体）
+# 第一项为占位符，确保用户选择任何模式都会触发播放
+FM_MODE_OPTIONS = ["请选择 FM 模式"] + list(FM_MODES.keys())
+
+# 默认 FM 模式（占位符）
+DEFAULT_FM_MODE = "请选择 FM 模式"
+
+# 实体名称
+ENTITY_NAME_FM_MODE = "fm_mode"
+ENTITY_NAME_PLAY_FM = "play_fm"
+ENTITY_NAME_FM_TRASH = "fm_trash"
+
+# FM URI 协议
+URI_PERSONAL_FM = "cloudmusic://163/fm"
+
+# 默认播放器配置
+CONF_DEFAULT_PLAYER = "default_player"

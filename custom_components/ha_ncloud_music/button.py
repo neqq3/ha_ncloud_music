@@ -28,6 +28,9 @@ from .const import (
     SEARCH_TYPE_ARTIST,
     SEARCH_TYPE_PLAYLIST,
     SEARCH_TYPE_RADIO,
+    # FM 相关
+    ENTITY_NAME_FM_TRASH,
+    CONF_DEFAULT_PLAYER,
 )
 from .manifest import manifest
 
@@ -46,6 +49,7 @@ async def async_setup_entry(
         CloudMusicSearchButton(hass, entry),
         CloudMusicDailyRecommendButton(hass, entry),
         CloudMusicMyFavoritesButton(hass, entry),
+        CloudMusicFMTrashButton(hass, entry),  # 单例 FM 垃圾桶按钮
     ])
 
 
@@ -328,6 +332,90 @@ class CloudMusicMyFavoritesButton(CloudMusicButton):
     async def async_press(self) -> None:
         """播放我喜欢的音乐歌单"""
         await self._play_media(URI_MY_FAVORITES, "我喜欢的音乐")
+
+
+class CloudMusicFMTrashButton(CloudMusicButton):
+    """私人 FM 垃圾桶按钮（单例全局实体）
+    
+    方案 D 实现：全局单一实体，动态查找目标播放器。
+    点击后将当前歌曲移入垃圾桶并跳到下一首。
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        super().__init__(hass, entry, ENTITY_NAME_FM_TRASH, "FM 不喜欢", "mdi:thumb-down")
+
+    def _find_first_ncloud_player(self):
+        """
+        动态查找目标云音乐播放器
+        
+        策略：
+        1. 优先使用用户配置的默认播放器
+        2. 如果未配置，返回第一个初始化成功的 CloudMusicMediaPlayer
+        """
+        # 读取用户配置的默认播放器
+        default_player_source = self._entry.options.get(CONF_DEFAULT_PLAYER, "")
+        
+        entity_registry = self.hass.data.get("entity_components", {}).get(MEDIA_PLAYER_DOMAIN)
+        if not entity_registry:
+            return None
+        
+        first_available = None
+        for entity in entity_registry.entities:
+            if hasattr(entity, '_is_fm_playing'):  # CloudMusicMediaPlayer 特征
+                # 记录第一个可用的（作为兆底）
+                if first_available is None:
+                    first_available = entity
+                # 如果配置了默认播放器，检查是否匹配
+                if default_player_source and entity.source_media_player == default_player_source:
+                    return entity
+        
+        # 未配置或未找到配置的播放器，返回第一个可用的
+        return first_available
+
+    async def async_press(self) -> None:
+        """不喜欢当前歌曲并跳到下一首"""
+        media_player_obj = self._find_first_ncloud_player()
+        
+        if media_player_obj is None:
+            _LOGGER.warning("未找到可用的云音乐媒体播放器")
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": "未找到可用的云音乐播放器，请先配置媒体播放器",
+                    "title": "私人 FM"
+                }
+            )
+            return
+        
+        # 检查是否在 FM 模式
+        if not media_player_obj._is_fm_playing:
+            _LOGGER.info("当前不在 FM 模式，不喜欢按钮无效")
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": "只有在私人 FM 模式下才能使用此功能",
+                    "title": "FM 不喜欢"
+                }
+            )
+            return
+        
+        _LOGGER.info(f"🗑️ FM 垃圾桶 -> 目标播放器: {media_player_obj.entity_id}")
+        
+        # 调用 media_player 的 async_fm_trash 方法
+        try:
+            await media_player_obj.async_fm_trash()
+        except Exception as e:
+            _LOGGER.error(f"FM 垃圾桶操作失败: {e}")
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": f"FM 垃圾桶操作失败: {e}",
+                    "title": "私人 FM"
+                }
+            )
 
 
 # 快捷按钮的通用播放方法（混入到基类中）

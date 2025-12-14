@@ -99,3 +99,42 @@ play_favorites:
       selector:
         entity:
           domain: media_player
+
+play_fm:
+  name: 播放私人 FM
+  description: 开始播放私人 FM，可选择不同的推荐模式
+  fields:
+    mode:
+      name: FM 模式
+      description: 私人 FM 推荐模式（默认推荐、AI DJ、熟悉的歌等）
+      required: false
+      default: "默认推荐"
+      selector:
+        select:
+          options:
+            - "默认推荐"
+            - "AI DJ"
+            - "熟悉的歌"
+            - "探索新歌"
+            - "运动模式"
+            - "专注模式"
+            - "夜晚情绪"
+    entity_id:
+      name: 播放器
+      description: 目标媒体播放器（可选）
+      required: false
+      selector:
+        entity:
+          domain: media_player
+
+fm_trash:
+  name: FM 不喜欢
+  description: 将当前歌曲移入私人 FM 垃圾桶并跳到下一首（仅在 FM 模式下有效）
+  fields:
+    entity_id:
+      name: 播放器
+      description: 目标媒体播放器（可选）
+      required: false
+      selector:
+        entity:
+          domain: media_player

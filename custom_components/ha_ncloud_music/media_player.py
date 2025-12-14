@@ -16,7 +16,7 @@ from homeassistant.const import (
     STATE_IDLE,
 )
 
-from .const import CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING
+from .const import CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING, FM_MODES, DEFAULT_FM_MODE
 
 from .manifest import manifest
 
@@ -91,6 +91,11 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         self._playlist_active = []   # 实际播放队列（随机或原始）
 
         self._play_index = 0         # 当前播放索引
+
+        # ========== 私人 FM 状态管理 ==========
+        self._fm_mode = None           # 当前 FM 模式名称（None = 普通模式）
+        self._is_fm_playing = False    # 是否处于 FM 播放模式
+        self._fm_preloading = False    # 是否正在预加载 FM 歌曲（防止重复请求）
 
 
     def interval(self, now):
@@ -274,6 +279,24 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         self._last_position_update = None
         self._next_track_scheduled = False  # 重置切歌调度标志
         
+        # 判断是否为 FM 内部播放（播放 FM 播放列表中的歌曲）
+        # 只有当播放非 FM 内容时才退出 FM 模式
+        is_fm_internal = False
+        if self._is_fm_playing and hasattr(self, 'playlist') and self.playlist:
+            # 检查 media_id 是否是当前 FM 播放列表中的歌曲 URL
+            for song in self.playlist:
+                if hasattr(song, 'url') and song.url and media_id:
+                    # 使用更宽松的匹配：检查 song.url 或 media_id 是否包含对方
+                    if song.url in str(media_id) or str(media_id) in song.url:
+                        is_fm_internal = True
+                        break
+        
+        if self._is_fm_playing and not is_fm_internal:
+            _LOGGER.warning(f"FM 模式检测到外部播放，退出 FM 模式。media_id={media_id[:50] if media_id else 'None'}...")
+            self.exit_fm_mode()
+        elif self._is_fm_playing:
+            _LOGGER.debug(f"FM 内部播放: {media_id[:50] if media_id else 'None'}...")
+        
         media_content_id = media_id
         result = await self.cloud_music.async_play_media(self, self.cloud_music, media_id)
         if result is not None:
@@ -448,7 +471,16 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
         import random
 
-        
+        # ========== FM 模式拦截器 ==========
+        if self._is_fm_playing and shuffle:
+            _LOGGER.warning("用户尝试在 FM 模式下开启随机，操作已拦截")
+            # 强制回滚状态
+            self._attr_shuffle = False
+            self.async_write_ha_state()
+            # 抛出异常显示底部 toast 提示
+            from homeassistant.exceptions import HomeAssistantError
+            raise HomeAssistantError("私人 FM 模式基于算法推荐，无法开启随机播放")
+        # =====================================
 
         self._attr_shuffle = shuffle
 
@@ -521,10 +553,166 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             _LOGGER.debug(f"关闭随机播放，恢复原始顺序")
 
 
+    # ==================== 私人 FM 核心方法 ====================
+
+    async def async_play_fm(self, mode_name: str = None):
+        """
+        启动私人 FM 播放
+        
+        Args:
+            mode_name: FM 模式名称（中文），如"默认推荐"、"AI DJ"等
+        """
+        mode_name = mode_name or "默认推荐"  # 使用真实的默认模式，不用占位符
+        
+        # 验证模式名称
+        if mode_name not in FM_MODES:
+            _LOGGER.warning(f"无效的 FM 模式: {mode_name}，使用默认模式")
+            mode_name = "默认推荐"  # 回退到真实的默认模式
+        
+        mode, submode = FM_MODES[mode_name]
+        
+        _LOGGER.info(f"🎵 启动私人 FM: {mode_name} (mode={mode}, submode={submode})")
+        
+        # 1. 进入 FM 模式（自动关闭随机）
+        self._is_fm_playing = True
+        self._fm_mode = mode_name
+        if self._attr_shuffle:
+            self._attr_shuffle = False
+            _LOGGER.info("进入 FM 模式，自动关闭随机播放")
+        
+        # 2. 获取 FM 歌曲
+        tracks = await self.cloud_music.async_get_personal_fm_mode(mode, submode)
+        
+        if not tracks:
+            _LOGGER.error("获取私人 FM 歌曲失败")
+            self._is_fm_playing = False
+            self._fm_mode = None
+            self.cloud_music.notification("获取私人 FM 失败，请检查登录状态")
+            return
+        
+        # 3. 设置播放列表
+        self.playlist = tracks
+        self._playlist_origin = list(tracks)
+        self._playlist_active = list(tracks)
+        self._play_index = 0
+        
+        # 4. 开始播放第一首
+        first_song = tracks[0]
+        self._attr_state = STATE_PLAYING
+        self._attr_media_position = 0
+        self._last_position_update = None
+        self._next_track_scheduled = False
+        
+        # 更新元数据
+        self._attr_app_name = first_song.singer
+        self._attr_media_image_url = first_song.thumbnail
+        self._attr_media_album_name = first_song.album
+        self._attr_media_title = first_song.song
+        self._attr_media_artist = first_song.singer
+        self._current_song_id = str(first_song.id)
+        
+        if first_song.duration > 0:
+            self._attr_media_duration = int(first_song.duration / 1000) if first_song.duration > 1000 else int(first_song.duration)
+        
+        # 播放音频
+        await self.async_call('play_media', {
+            'media_content_id': first_song.url,
+            'media_content_type': 'music'
+        })
+        
+        self.before_state = None
+        self.async_write_ha_state()
+        
+        _LOGGER.info(f"私人 FM 开始播放: {first_song.song} - {first_song.singer}")
+
+    async def _async_preload_fm_tracks(self):
+        """
+        预加载 FM 歌曲（当剩余歌曲不足时调用）
+        
+        触发条件：播放列表剩余 ≤ 2 首歌
+        """
+        if not self._is_fm_playing or self._fm_preloading:
+            return
+        
+        if self._fm_mode not in FM_MODES:
+            return
+        
+        # 检查剩余歌曲数
+        remaining = len(self.playlist) - self._play_index - 1
+        if remaining > 2:
+            return
+        
+        self._fm_preloading = True
+        _LOGGER.info(f"🔄 FM 预加载：剩余 {remaining} 首，开始获取更多歌曲")
+        
+        try:
+            mode, submode = FM_MODES[self._fm_mode]
+            new_tracks = await self.cloud_music.async_get_personal_fm_mode(mode, submode)
+            
+            if new_tracks:
+                # 去重：过滤掉已存在于播放列表中的歌曲
+                existing_ids = {str(song.id) for song in self.playlist if hasattr(song, 'id')}
+                unique_tracks = [t for t in new_tracks if str(t.id) not in existing_ids]
+                
+                if unique_tracks:
+                    # 追加到播放列表
+                    self.playlist.extend(unique_tracks)
+                    self._playlist_origin.extend(unique_tracks)
+                    self._playlist_active.extend(unique_tracks)
+                    _LOGGER.info(f"FM 预加载完成：追加 {len(unique_tracks)} 首新歌曲（过滤 {len(new_tracks) - len(unique_tracks)} 首重复），总计 {len(self.playlist)} 首")
+                else:
+                    _LOGGER.warning(f"FM 预加载：API 返回 {len(new_tracks)} 首歌曲，但都是重复的")
+            else:
+                _LOGGER.warning("FM 预加载失败：API 返回空列表")
+        except Exception as e:
+            _LOGGER.error(f"FM 预加载异常: {e}")
+        finally:
+            self._fm_preloading = False
+
+    async def async_fm_trash(self):
+        """
+        不喜欢当前歌曲并跳到下一首
+        
+        调用 fm_trash API 将歌曲移入垃圾桶，然后自动切歌
+        """
+        if not self._is_fm_playing:
+            _LOGGER.warning("当前不在 FM 模式，无法执行垃圾桶操作")
+            return
+        
+        if not hasattr(self, '_current_song_id') or not self._current_song_id:
+            _LOGGER.warning("无法获取当前歌曲 ID")
+            return
+        
+        song_id = self._current_song_id
+        song_name = self._attr_media_title or "未知歌曲"
+        
+        _LOGGER.info(f"🗑️ FM 垃圾桶：{song_name} ({song_id})")
+        
+        # 1. 调用 API
+        success = await self.cloud_music.async_fm_trash(song_id)
+        
+        # 2. 无论成功与否，都跳到下一首（用户不想听这首歌）
+        await self.async_media_next_track()
+        
+        if success:
+            self.cloud_music.notification(f"已将「{song_name}」移入私人 FM 垃圾桶", "ncloud_fm_trash")
+
+    def exit_fm_mode(self):
+        """退出 FM 模式（切换到普通歌单时调用）"""
+        if self._is_fm_playing:
+            _LOGGER.info("退出私人 FM 模式")
+            self._is_fm_playing = False
+            self._fm_mode = None
+            self._fm_preloading = False
+
 
     async def async_media_next_track(self):
         self._attr_state = STATE_PAUSED
         await self.cloud_music.async_media_next_track(self, self._attr_shuffle)
+        
+        # FM 模式：检查是否需要预加载
+        if self._is_fm_playing:
+            await self._async_preload_fm_tracks()
 
     async def async_media_previous_track(self):
         self._attr_state = STATE_PAUSED
@@ -571,12 +759,20 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
     def _on_source_player_state_change(self, event):
         """底层播放器状态变化回调"""
         self._update_source_player_attributes()
-        self.async_write_ha_state()
+        # 使用线程安全的方式调用 async_write_ha_state
+        self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
 
     def _update_source_player_attributes(self):
         """从底层播放器同步属性"""
         state = self.hass.states.get(self.source_media_player)
         if state:
+            # 检查底层播放器是否离线
+            if state.state == 'unavailable':
+                self._attr_available = False
+                return
+            else:
+                self._attr_available = True
+            
             # 同步音量
             volume = state.attributes.get('volume_level')
             if volume is not None:
@@ -586,6 +782,9 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             muted = state.attributes.get('is_volume_muted')
             if muted is not None:
                 self._attr_is_volume_muted = muted
+        else:
+            # 底层播放器不存在
+            self._attr_available = False
 
     # 调用服务
     async def async_call(self, service, service_data={}):

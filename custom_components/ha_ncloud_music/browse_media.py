@@ -1197,7 +1197,17 @@ async def async_media_next_track(media_player, shuffle=False):
         # 非随机模式，使用 _play_index
         media_player._play_index += 1
         if media_player._play_index >= len(media_player.playlist):
-            media_player._play_index = 0
+            # FM 模式：不循环，触发预加载
+            if hasattr(media_player, '_is_fm_playing') and media_player._is_fm_playing:
+                _LOGGER.info("FM 模式播放到列表末尾，触发预加载")
+                await media_player._async_preload_fm_tracks()
+                # 预加载后检查是否有新歌
+                if media_player._play_index < len(media_player.playlist):
+                    pass  # 有新歌，继续播放
+                else:
+                    media_player._play_index = 0  # 还是没有新歌，循环
+            else:
+                media_player._play_index = 0
     
     # 记录播放日志
     current_song = media_player.playlist[media_player.playindex]
@@ -1205,4 +1215,5 @@ async def async_media_next_track(media_player, shuffle=False):
     if shuffle and hasattr(media_player, '_play_index'):
         _LOGGER.info(f"   随机索引: {media_player._play_index + 1}/{len(media_player._playlist_active)}")
     await media_player.async_play_media(MediaType.MUSIC, current_song.url)
+
 
