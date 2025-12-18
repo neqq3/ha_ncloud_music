@@ -71,6 +71,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.http.register_view(HttpView)
     hass.http.register_view(CloudMusicApiView)
+    
+    # 注册 Subsonic API 视图（可选，异常隔离）
+    try:
+        from .subsonic import SubsonicApiView
+        hass.http.register_view(SubsonicApiView)
+        _LOGGER.info("✅ Subsonic API 已启用: /rest/rest/")
+    except Exception as e:
+        _LOGGER.warning(f"Subsonic API 启用失败（不影响主功能）: {e}")
+    
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(update_listener))
     

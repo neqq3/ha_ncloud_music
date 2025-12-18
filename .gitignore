@@ -157,3 +157,4 @@ migration/
 
 # Development notes - DO NOT COMMIT
 .ha_dev/
+docs/SUBSONIC_DEBUG.md
