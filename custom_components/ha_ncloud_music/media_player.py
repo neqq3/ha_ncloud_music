@@ -326,6 +326,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
     async def async_play_media(self, media_type, media_id, **kwargs):
         self._manual_stop_requested = False
+        media_content_id = None
 
         self._attr_state = STATE_PAUSED
         # 重置进度计时
@@ -376,6 +377,12 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
                     media_content_id = self._playlist_active[self._play_index].url
                 else:
                     media_content_id = self.playlist[self.playindex].url
+
+        if not media_content_id:
+            _LOGGER.error("播放失败：无法解析 media_content_id (media_id=%s, result=%s)", media_id, result)
+            self._attr_state = STATE_IDLE
+            self.async_write_ha_state()
+            return
 
         self._attr_media_content_id = media_content_id
         await self.async_call('play_media', {
