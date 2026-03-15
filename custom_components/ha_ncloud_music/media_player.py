@@ -378,12 +378,6 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
                     media_content_id = self.playlist[self.playindex].url
 
         self._attr_media_content_id = media_content_id
-        await self.async_call('play_media', {
-            'media_content_id': media_content_id,
-            'media_content_type': 'music'
-        })
-        self._attr_state = STATE_PLAYING
-        
         # 立即更新元数据（避免等待 interval）
         if hasattr(self, 'playlist') and len(self.playlist) > 0:
             music_info = self.playlist[self.playindex]
@@ -397,6 +391,19 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
                 self._attr_media_duration = int(music_info.duration / 1000) if music_info.duration > 1000 else int(music_info.duration)
             # 存储 song_id 供前端歌词卡片使用
             self._current_song_id = str(music_info.id)
+            _extra = {
+                'title': music_info.song,
+                'thumb': music_info.picUrl,
+                'metadata': {'artist': music_info.singer, 'album': music_info.album},
+            }
+        else:
+            _extra = {}
+        await self.async_call('play_media', {
+            'media_content_id': media_content_id,
+            'media_content_type': 'music',
+            'extra': _extra,
+        })
+        self._attr_state = STATE_PLAYING
         
         # 通知 HA 更新状态（播放新歌时立即刷新）
         self.async_write_ha_state()
@@ -684,7 +691,12 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         # 播放音频
         await self.async_call('play_media', {
             'media_content_id': first_song.url,
-            'media_content_type': 'music'
+            'media_content_type': 'music',
+            'extra': {
+                'title': first_song.song,
+                'thumb': first_song.picUrl,
+                'metadata': {'artist': first_song.singer, 'album': first_song.album},
+            },
         })
         
         self.before_state = None
@@ -818,7 +830,12 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         self._is_new_track = True
         await self.async_call('play_media', {
             'media_content_id': media_content_id,
-            'media_content_type': 'music'
+            'media_content_type': 'music',
+            'extra': {
+                'title': self._attr_media_title or '',
+                'thumb': self._attr_media_image_url or '',
+                'metadata': {'artist': self._attr_media_artist or '', 'album': self._attr_media_album_name or ''},
+            },
         })
         self._attr_state = STATE_PLAYING
         self.before_state = None
@@ -839,7 +856,12 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             # 重新发送 play_media 到底层播放器
             await self.async_call('play_media', {
                 'media_content_id': media_content_id,
-                'media_content_type': 'music'
+                'media_content_type': 'music',
+                'extra': {
+                    'title': self._attr_media_title or '',
+                    'thumb': self._attr_media_image_url or '',
+                    'metadata': {'artist': self._attr_media_artist or '', 'album': self._attr_media_album_name or ''},
+                },
             })
             
             # 恢复完成后，尝试 seek 到之前的位置（如果播放器支持）
