@@ -153,3 +153,39 @@ class CloudMusicApiView(HomeAssistantView):
                 'error': f'Unknown action: {action}',
                 'available_actions': ['lyric', 'song_detail']
             }, status=400)
+
+
+class CloudMusicQRCodeView(HomeAssistantView):
+    """Serve the cached QR login image locally for the HA media browser."""
+
+    url = "/cloud_music/qrcode"
+    name = "cloud_music:qrcode"
+    requires_auth = False
+
+    async def get(self, request):
+        hass = request.app["hass"]
+        cloud_music = hass.data.get('cloud_music')
+        if cloud_music is None:
+            return web.Response(status=503)
+
+        qr = cloud_music.login_qrcode
+        if request.query.get('key') != qr.get('key'):
+            return web.Response(status=404)
+
+        qrimg = qr.get('img')
+        if not qrimg:
+            return web.Response(status=404)
+
+        if ',' in qrimg:
+            qrimg = qrimg.split(',', 1)[1]
+
+        try:
+            image = base64.b64decode(qrimg)
+        except Exception:
+            return web.Response(status=500)
+
+        return web.Response(
+            body=image,
+            content_type='image/png',
+            headers={'Cache-Control': 'no-store'}
+        )

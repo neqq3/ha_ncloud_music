@@ -8,7 +8,7 @@ import logging
 import asyncio
 from .const import PLATFORMS
 from .manifest import manifest
-from .http import HttpView, CloudMusicApiView
+from .http import HttpView, CloudMusicApiView, CloudMusicQRCodeView
 from .cloud_music import CloudMusic
 
 DOMAIN = manifest.domain
@@ -75,6 +75,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.http.register_view(HttpView)
     hass.http.register_view(CloudMusicApiView)
+    hass.http.register_view(CloudMusicQRCodeView)
     
     # 注册 Subsonic API 视图（可选，异常隔离）
     try:

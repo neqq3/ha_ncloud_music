@@ -42,7 +42,8 @@ class CloudMusic():
         self.login_qrcode = {
             'key': None,
             'time': None,
-            'url': None
+            'url': None,
+            'img': None
         }
 
     def get_storage_dir(self, file_name):
@@ -114,7 +115,8 @@ class CloudMusic():
         self.login_qrcode = {
             'key': None,
             'time': None,
-            'url': None
+            'url': None,
+            'img': None
         }
         self.notification('用户凭据失效，请重新登录。如果多次失败，请联系插件作者')
 
