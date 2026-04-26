@@ -59,6 +59,8 @@ https://github.com/neteasecloudmusicapienhanced/api-enhanced
 
 > Music Assistant 中更推荐优先尝试 **Jellyfin** 接入；如果你同时使用 Subsonic 客户端，也可以保留 **OpenSubsonic** 方式作为补充。
 
+> Jellyfin 接入参数：在 Music Assistant 中添加 `Jellyfin` provider，`Server URL` 填写 `你的 HA 地址/jellyfin`，例如 `http://192.168.1.10:8123/jellyfin`。用户名和密码可任意填写，本插件会返回虚拟 Jellyfin 用户。
+
 > OpenSubsonic 接入参数：`Base URL = 你的 HA 地址`，`Port = 8123`，`Server Path = /rest`
 
 Jellyfin 接入时，如果想快速找到收藏歌单，可以直接在全局搜索中输入“我的歌单”；OpenSubsonic 接入时则可以直接在 `Playlists` 页面看到：
