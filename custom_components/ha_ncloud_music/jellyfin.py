@@ -242,7 +242,7 @@ class JellyfinHandler:
             parent_id = parent_id_raw
         
         # 处理 ParentId 请求 - 获取专辑或歌单内的歌曲
-        if parent_id:
+        if parent_id and (parent_id.startswith('al_') or parent_id.startswith('pl_')):
             _LOGGER.info(f"Jellyfin Items: 获取 ParentId={parent_id} 的子项目")
             items = []
             
@@ -290,9 +290,21 @@ class JellyfinHandler:
                             "Etag": "netease_music_etag",
                             "CanDownload": False,
                             "SupportsSync": False
+                        },
+                        {
+                            # MA 2.8.8 的 Jellyfin provider 会从 get_media_folders 中寻找
+                            # CollectionType=playlists 的库，再用这个 ParentId 同步歌单。
+                            "Id": "netease_playlists_library",
+                            "Name": "云音乐歌单",
+                            "Type": "CollectionFolder",
+                            "CollectionType": "playlists",
+                            "ServerId": "netease_server",
+                            "Etag": "netease_playlists_etag",
+                            "CanDownload": False,
+                            "SupportsSync": False
                         }
                     ],
-                    "TotalRecordCount": 1,
+                    "TotalRecordCount": 2,
                     "StartIndex": 0
                 }
                 return self._success_response(response_data)
