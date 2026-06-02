@@ -418,6 +418,8 @@ class SubsonicApiView(HomeAssistantView):
         if album_id and album_id.startswith('pl_'):
             real_id = album_id[3:]
             try:
+                # search3 阶段把歌单伪装成 album 返回后，MA 点进详情会继续调用 getAlbum。
+                # 这里负责把这个“伪专辑”再还原成真实歌单内容，保证搜索结果可继续浏览。
                 # 获取歌单详情
                 playlist_result = await cloud_music.netease_cloud_music(f'/playlist/detail?id={real_id}')
                 if playlist_result and playlist_result.get('playlist'):
@@ -801,7 +803,9 @@ class SubsonicApiView(HomeAssistantView):
         # 所以我们把歌单伪装成专辑，用户点击后通过 getAlbum 获取歌单详情
         # 同时缓存到 _searched_playlists_cache，在 getPlaylists 中显示
         
-        # 清空之前的缓存，只保留最近一次搜索的结果
+        # 清空之前的缓存，只保留最近一次搜索的结果。
+        # 这是一个有意为之的妥协：MA 不会把搜索关键词再带到 Playlists 页面，
+        # 所以这里只保留“最近一次搜索上下文”，避免旧搜索结果长期混在用户歌单里。
         _searched_playlists_cache.clear()
         _LOGGER.info(f"Subsonic search3: 清空歌单缓存，开始新搜索 keywords={query}")
         playlist_as_albums = []
@@ -829,7 +833,8 @@ class SubsonicApiView(HomeAssistantView):
                         "created": "2020-01-01T00:00:00.000Z",
                         "year": None
                     })
-                    # 同时缓存歌单到全局变量，用于偷渡到 getPlaylists
+                    # 同时缓存歌单到全局变量，用于偷渡到 getPlaylists。
+                    # 这样用户即使切到 Playlists 标签页，也还能看到刚搜到的歌单。
                     _searched_playlists_cache[f"p_{item.get('id')}"] = {
                         "id": f"p_{item.get('id')}",
                         "name": f"[搜索] {item.get('name', '')}",
@@ -847,8 +852,9 @@ class SubsonicApiView(HomeAssistantView):
         except Exception as e:
             _LOGGER.error(f"Subsonic search3 歌单搜索失败: {e}", exc_info=True)
         
-        # 组合结果：歌单在前，专辑在后
-        # MA 的 Albums 标签页只显示前 50 个，所以把歌单放前面确保能显示
+        # 组合结果：歌单在前，专辑在后。
+        # 这是另一个展示层妥协：MA 的 Albums 标签页只显示前几十个结果，
+        # 如果把歌单排在后面，它们很容易被普通专辑挤掉，看起来就像“搜不到歌单”。
         _LOGGER.info(f"Subsonic search3: 歌单 {len(playlist_as_albums)} 个, 专辑 {len(albums)} 个")
         
         # 限制专辑数量为 20，给歌单留空间
@@ -1343,8 +1349,9 @@ class SubsonicApiView(HomeAssistantView):
                     "coverArt": f"p_{playlist_id}"  # 用于 getCoverArt
                 })
             
-            # 添加缓存的搜索歌单（偷渡功能）
-            # 搜索歌单会在 search3 时缓存，这里添加到用户歌单列表前面
+            # 添加缓存的搜索歌单（偷渡功能）。
+            # OpenSubsonic/MA 没有“搜索歌单结果页”到“歌单列表页”的原生通道，
+            # 所以这里把最近一次搜索命中的歌单临时插到用户歌单列表里，作为补偿展示。
             if _searched_playlists_cache:
                 _LOGGER.info(f"Subsonic getPlaylists: 偷渡 {len(_searched_playlists_cache)} 个搜索歌单")
                 for pl in _searched_playlists_cache.values():
