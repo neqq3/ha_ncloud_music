@@ -161,3 +161,8 @@ docs/SUBSONIC_DEBUG.md
 
 # HAOS deployment scripts - DO NOT COMMIT
 /scripts/
+
+# Local Codex tooling and temporary downloads
+.tools/
+repo_tmp/
+repo.zip

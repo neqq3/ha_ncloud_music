@@ -13,6 +13,7 @@ OpenSubsonic API 兼容层
 """
 
 import logging
+import re
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 
@@ -21,10 +22,18 @@ _LOGGER = logging.getLogger(__name__)
 # Subsonic API 版本
 SUBSONIC_API_VERSION = "1.16.1"
 SERVER_NAME = "ha_ncloud_music"
+# MA 可能会把解析失败的 coverArt ID 当成本地文件路径交给 ffmpeg。
+# 因此 getCoverArt 最后必须兜底到一个真实图片 URL。
+DEFAULT_COVER_URL = "https://p2.music.126.net/fL9ORyu0e777lppGU3D89A==/109951167206009876.jpg"
+# OpenSubsonic search3 没有歌单结果字段，只能把歌单伪装成专辑。
+# 给这些伪专辑挂一个稳定的虚拟歌手，避免 MA 记录找不到 artistId 的日志。
+PLAYLIST_ARTIST_ID = "ar_playlist"
 
 
 # 模块级别的缓存，用于存储搜索到的歌单（偷渡到 getPlaylists）
 _searched_playlists_cache = {}
+
+_LRC_LINE_RE = re.compile(r"\[(\d+):(\d+)(?:\.(\d+))?\]")
 
 class SubsonicApiView(HomeAssistantView):
     """
@@ -186,6 +195,80 @@ class SubsonicApiView(HomeAssistantView):
         if key in post_data:
             return post_data.get(key)
         return default
+
+    def _parse_lrc_to_structured_lyrics(self, lyric_text: str) -> list[dict]:
+        """将 LRC 歌词转换为 OpenSubsonic 结构化歌词行。"""
+        lines = []
+        for raw_line in lyric_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            matches = list(_LRC_LINE_RE.finditer(line))
+            if not matches:
+                continue
+
+            content = line[matches[-1].end():].strip()
+            if not content:
+                continue
+
+            for match in matches:
+                minutes = int(match.group(1))
+                seconds = int(match.group(2))
+                fraction = match.group(3) or "0"
+                # LRC 小数位可能是厘秒或毫秒，这里统一换算成毫秒。
+                if len(fraction) == 1:
+                    milliseconds = int(fraction) * 100
+                elif len(fraction) == 2:
+                    milliseconds = int(fraction) * 10
+                else:
+                    milliseconds = int(fraction[:3].ljust(3, '0'))
+
+                start_ms = minutes * 60 * 1000 + seconds * 1000 + milliseconds
+                lines.append({
+                    "start": start_ms,
+                    "value": content,
+                })
+
+        return lines
+
+    def _build_structured_lyrics(self, song_id: str, lyric_data: dict) -> list[dict]:
+        """根据云音乐歌词数据构造 OpenSubsonic 结构化歌词。"""
+        # MA 2.8+ 发现 songLyrics 扩展后会调用 getLyricsBySongId。
+        # 没有歌词时返回成功的空列表，比返回 API 错误更安全，
+        # 否则可能中断 MA 的歌单浏览流程。
+        lrc = lyric_data.get('lrc', '') or ''
+        if lrc:
+            lines = self._parse_lrc_to_structured_lyrics(lrc)
+            if lines:
+                return [{
+                    "displayArtist": "",
+                    "displayTitle": "",
+                    "lang": "",
+                    "offset": 0,
+                    "synced": True,
+                    "line": lines,
+                }]
+
+        plain_text = lyric_data.get('lrc', '') or lyric_data.get('yrc', '') or ''
+        if plain_text:
+            text_lines = []
+            for raw_line in plain_text.splitlines():
+                line = _LRC_LINE_RE.sub('', raw_line).strip()
+                if not line or line.startswith('['):
+                    continue
+                text_lines.append({"value": line})
+            if text_lines:
+                return [{
+                    "displayArtist": "",
+                    "displayTitle": "",
+                    "lang": "",
+                    "synced": False,
+                    "line": text_lines,
+                }]
+
+        _LOGGER.debug("Subsonic lyrics: no usable lyric lines for song %s", song_id)
+        return []
     
     async def _handle_request(self, request, method: str, post_data: dict):
         """统一处理 Subsonic 请求"""
@@ -425,6 +508,20 @@ class SubsonicApiView(HomeAssistantView):
         artist_id = self._get_param(request, post_data, 'id', '')
         if not artist_id or not artist_id.startswith('ar_'):
             return self._error_response(request, post_data, 10, "Invalid artist id")
+
+        if artist_id == PLAYLIST_ARTIST_ID:
+            # 这个虚拟歌手只服务于“歌单伪装成专辑”的搜索结果。
+            # 内容故意保持为空，MA 只需要这个映射是合法可解析的。
+            return self._response(request, post_data, {
+                "artist": {
+                    "id": PLAYLIST_ARTIST_ID,
+                    "name": "歌单",
+                    "coverArt": "",
+                    "artistImageUrl": "",
+                    "albumCount": 0,
+                    "album": []
+                }
+            })
         
         real_id = artist_id[3:]
         
@@ -557,6 +654,72 @@ class SubsonicApiView(HomeAssistantView):
                 {"name": "songLyrics", "versions": [1]},
             ]
         })
+
+    async def _handle_getLyricsBySongId(self, request, post_data, cloud_music) -> web.Response:
+        """getLyricsBySongId - 为 OpenSubsonic 客户端返回结构化歌词。"""
+        song_id = self._get_param(request, post_data, 'id', '')
+        if not song_id or not song_id.startswith('s_'):
+            return self._error_response(request, post_data, 10, "Invalid song id")
+
+        real_id = song_id[2:]
+        try:
+            lyric_data = await cloud_music.async_get_lyric(real_id)
+            structured_lyrics = self._build_structured_lyrics(real_id, lyric_data)
+            return self._response(request, post_data, {
+                "lyricsList": {
+                    "structuredLyrics": structured_lyrics
+                }
+            })
+        except Exception as e:
+            _LOGGER.error(f"Subsonic getLyricsBySongId 失败: {e}", exc_info=True)
+            # 即使云音乐没有歌词或歌词接口失败，也保持端点成功返回；
+            # 否则 MA 会报告 Method/API 错误。
+            return self._response(request, post_data, {
+                "lyricsList": {
+                    "structuredLyrics": []
+                }
+            })
+
+    async def _handle_getLyrics(self, request, post_data, cloud_music) -> web.Response:
+        """getLyrics - 兼容旧 Subsonic 客户端的歌词端点。"""
+        title = self._get_param(request, post_data, 'title', '')
+        artist = self._get_param(request, post_data, 'artist', '')
+
+        if not title:
+            return self._response(request, post_data, {"lyricsList": {"lyrics": []}})
+
+        from urllib.parse import quote
+
+        try:
+            search_result = await cloud_music.netease_cloud_music(
+                f'/cloudsearch?keywords={quote(title)}&type=1&limit=10'
+            )
+            if search_result and search_result.get('result') and search_result['result'].get('songs'):
+                matched_song = None
+                for song in search_result['result']['songs']:
+                    artists = song.get('ar', []) or song.get('artists', [])
+                    artist_names = [item.get('name', '') for item in artists]
+                    if not artist or artist in artist_names:
+                        matched_song = song
+                        break
+
+                if matched_song:
+                    lyric_data = await cloud_music.async_get_lyric(str(matched_song.get('id')))
+                    plain_lyrics = lyric_data.get('lrc', '') or ''
+                    if plain_lyrics:
+                        return self._response(request, post_data, {
+                            "lyricsList": {
+                                "lyrics": [{
+                                    "artist": artist,
+                                    "title": title,
+                                    "value": plain_lyrics
+                                }]
+                            }
+                        })
+        except Exception as e:
+            _LOGGER.error(f"Subsonic getLyrics 失败: {e}", exc_info=True)
+
+        return self._response(request, post_data, {"lyricsList": {"lyrics": []}})
     
     # ==================== 搜索 API ====================
     
@@ -657,7 +820,9 @@ class SubsonicApiView(HomeAssistantView):
                         "id": f"pl_{item.get('id')}",  # pl_ 前缀表示歌单
                         "name": f"[歌单] {item.get('name', '')}",  # 使用中文标识
                         "artist": f"歌单 · {creator.get('nickname', '未知')}",
-                        "artistId": "",
+                        # search3 没有 playlist 字段，歌单只能作为 album 返回；
+                        # 但 artistId 仍然必须能被 MA 解析。
+                        "artistId": PLAYLIST_ARTIST_ID,
                         "coverArt": f"p_{item.get('id')}",  # 使用歌单封面
                         "songCount": item.get('trackCount', 0),
                         "duration": 0,
@@ -1053,9 +1218,16 @@ class SubsonicApiView(HomeAssistantView):
             elif cover_id.startswith('ar_'):
                 real_id = cover_id[3:]
                 # 获取艺术家的热门专辑，使用第一张专辑的封面
-                result = await cloud_music.netease_cloud_music(f'/artist/album?id={real_id}&limit=1')
-                if result and result.get('hotAlbums') and len(result['hotAlbums']) > 0:
-                    cover_url = result['hotAlbums'][0].get('picUrl', '')
+                if cover_id != PLAYLIST_ARTIST_ID:
+                    result = await cloud_music.netease_cloud_music(f'/artist/album?id={real_id}&limit=1')
+                    if result and result.get('hotAlbums') and len(result['hotAlbums']) > 0:
+                        cover_url = result['hotAlbums'][0].get('picUrl', '')
+                    if not cover_url:
+                        # 有些歌手没有热门专辑，但 artist/detail 里仍可能有头像或封面。
+                        result = await cloud_music.netease_cloud_music(f'/artist/detail?id={real_id}')
+                        if result and result.get('data') and result['data'].get('artist'):
+                            artist_data = result['data']['artist']
+                            cover_url = artist_data.get('cover') or artist_data.get('avatar')
             
             # 歌单封面 (p_xxx)
             elif cover_id.startswith('p_'):
@@ -1084,6 +1256,10 @@ class SubsonicApiView(HomeAssistantView):
                 if result and result.get('songs'):
                     cover_url = result['songs'][0].get('al', {}).get('picUrl', '')
             
+            if not cover_url:
+                _LOGGER.debug(f"Subsonic getCoverArt: no cover URL for {cover_id}, using fallback")
+                cover_url = DEFAULT_COVER_URL
+
             if cover_url:
                 # 只有当 MA 明确请求尺寸时才添加 ?param= 参数
                 # 否则返回原图（最大清晰度）
@@ -1098,6 +1274,9 @@ class SubsonicApiView(HomeAssistantView):
                         if resp.status == 200:
                             image_data = await resp.read()
                             content_type = resp.headers.get('Content-Type', 'image/jpeg')
+                            # aiohttp.web.Response 只接受媒体类型；
+                            # 云音乐有时会返回 "image/jpeg; charset=..." 这类值。
+                            content_type = content_type.split(';', 1)[0].strip()
                             _LOGGER.debug(f"Subsonic getCoverArt: 返回图片 {len(image_data)} bytes")
                             return web.Response(body=image_data, content_type=content_type)
                         else:
@@ -1243,25 +1422,36 @@ class SubsonicApiView(HomeAssistantView):
             playlist_info = await cloud_music.netease_cloud_music(f'/playlist/detail?id={real_id}')
             playlist_data = playlist_info.get('playlist', {}) if playlist_info else {}
             
-            # 获取歌曲列表
-            songs = await cloud_music.async_get_playlist(real_id)
-            if not songs:
+            # MA 会通过歌曲的专辑映射来解析歌单内单曲封面，
+            # 所以这里直接使用云音乐原始歌曲接口，保留 al/ar ID，
+            # 不再使用会丢失这些 ID 的简化 async_get_playlist 模型。
+            tracks_res = await cloud_music.netease_cloud_music(
+                f'/playlist/track/all?id={real_id}&limit=1000'
+            )
+            track_items = tracks_res.get('songs', []) if tracks_res else []
+            if not track_items:
                 return self._error_response(request, post_data, 70, "Playlist not found")
             
             songs_list = []
-            for song in songs:
+            for song in track_items:
+                album_info = song.get('al') or {}
+                artists = song.get('ar') or []
+                album_id = album_info.get('id')
+                artist_id = artists[0].get('id') if artists else None
                 songs_list.append({
-                    "id": f"s_{song.id}",
+                    "id": f"s_{song.get('id')}",
                     "isDir": False,
-                    "title": song.song,
-                    "album": getattr(song, 'album', ''),
-                    "artist": song.singer,
-                    "duration": int(song.duration / 1000) if song.duration > 1000 else int(song.duration),
-                    "coverArt": f"s_{song.id}",
+                    "title": song.get('name', ''),
+                    "album": album_info.get('name', ''),
+                    "artist": ', '.join([artist.get('name', '') for artist in artists]),
+                    "duration": int(song.get('dt', 0) / 1000),
+                    "coverArt": f"s_{song.get('id')}",
+                    "parent": f"al_{album_id}" if album_id else "",
+                    "albumId": f"al_{album_id}" if album_id else "",
+                    "artistId": f"ar_{artist_id}" if artist_id else "",
                     "contentType": "audio/mpeg",
                     "suffix": "mp3",
                     "type": "music"
-                    # 注意：不设置 parent 和 albumId，避免 MA 尝试调用 getAlbum
                 })
             
             return self._response(request, post_data, {
