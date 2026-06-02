@@ -444,7 +444,7 @@ class SubsonicApiView(HomeAssistantView):
                             "contentType": "audio/mpeg",
                             "coverArt": f"s_{song.id}",
                             "albumId": album_id,
-                            "artistId": "",
+                            "artistId": PLAYLIST_ARTIST_ID,
                             "type": "music",
                             "created": "2020-01-01T00:00:00.000Z"
                         })
@@ -455,7 +455,7 @@ class SubsonicApiView(HomeAssistantView):
                             "id": album_id,
                             "name": f"📋 {playlist_data.get('name', '')}",
                             "artist": f"歌单 · {creator.get('nickname', '未知')}",
-                            "artistId": "",
+                            "artistId": PLAYLIST_ARTIST_ID,
                             "coverArt": f"p_{real_id}",
                             "songCount": len(songs_list),
                             "duration": sum(s.get('duration', 0) for s in songs_list),
