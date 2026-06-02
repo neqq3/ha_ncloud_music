@@ -17,6 +17,8 @@ import re
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 
+from .stream_compat import should_use_stream_compat, stream_with_media_headers
+
 _LOGGER = logging.getLogger(__name__)
 
 # Subsonic API 版本
@@ -1175,6 +1177,9 @@ class SubsonicApiView(HomeAssistantView):
             url, fee = await cloud_music.song_url(real_id)
             
             if url:
+                if should_use_stream_compat(url):
+                    _LOGGER.debug("Subsonic stream: 使用 MA 兼容流式转发 %s...", url[:50])
+                    return await stream_with_media_headers(request, url)
                 _LOGGER.debug(f"Subsonic stream: 重定向到 {url[:50]}...")
                 return web.HTTPFound(url)
             else:

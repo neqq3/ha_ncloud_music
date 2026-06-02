@@ -6,6 +6,8 @@ Jellyfin API Handler for NetEase Cloud Music
 import logging
 from aiohttp import web
 
+from .stream_compat import should_use_stream_compat, stream_with_media_headers
+
 _LOGGER = logging.getLogger(__name__)
 
 # 虚拟用户配置
@@ -931,6 +933,9 @@ class JellyfinHandler:
             url, fee = await self.cloud_music.song_url(int(real_id))
             if url:
                 _LOGGER.info(f"Jellyfin Audio: 获取到播放URL (fee={fee}), url={url[:50]}...")
+                if should_use_stream_compat(url):
+                    _LOGGER.debug("Jellyfin Audio: 使用 MA 兼容流式转发 %s...", url[:50])
+                    return await stream_with_media_headers(request, url)
                 raise web.HTTPFound(url)
             else:
                 _LOGGER.warning(f"Jellyfin Audio: 歌曲 {real_id} 无可用 URL")

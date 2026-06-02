@@ -212,9 +212,13 @@ class CloudMusic():
         """
         # 使用传入的 level 或实例配置的 audio_quality
         _level = level or self.audio_quality
+        # 播放直链可能有有效期，带时间戳绕开 API 的短缓存，避免 MA 反复拿到旧地址。
+        timestamp = int(time.time() * 1000)
         
         # 1. 先尝试官方源
-        res = await self.netease_cloud_music(f'/song/url/v1?id={id}&level={_level}')
+        res = await self.netease_cloud_music(
+            f'/song/url/v1?id={id}&level={_level}&timestamp={timestamp}'
+        )
         data = res.get('data', [{}])[0]
         url = data.get('url')
         trial_info = data.get('freeTrialInfo')
@@ -229,7 +233,7 @@ class CloudMusic():
         _LOGGER.info(f"歌曲 {id} 需要解灰（试听限制或无URL），尝试解灰源")
         try:
             res_unblock = await self.netease_cloud_music(
-                f'/song/url/match?id={id}&source=pyncmd,bodian,kuwo'
+                f'/song/url/match?id={id}&source=pyncmd,bodian,kuwo&timestamp={timestamp}'
             )
             if res_unblock.get('code') == 200:
                 unblock_data = res_unblock.get('data', {})
