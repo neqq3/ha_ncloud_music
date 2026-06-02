@@ -1179,11 +1179,11 @@ class SubsonicApiView(HomeAssistantView):
                 return web.HTTPFound(url)
             else:
                 _LOGGER.warning(f"Subsonic stream: 无法获取歌曲 {real_id} 的 URL")
-                return self._error_response(request, post_data, 70, "Stream not available")
+                return web.Response(status=404, text=f"Item '{song_id}' not found")
                 
         except Exception as e:
             _LOGGER.error(f"Subsonic stream 失败: {e}")
-            return self._error_response(request, post_data, 0, "Stream error")
+            return web.Response(status=500, text="Stream error")
     
     async def _handle_download(self, request, post_data, cloud_music) -> web.Response:
         """download - 下载（复用 stream 逻辑）"""
