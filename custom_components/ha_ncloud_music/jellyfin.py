@@ -507,6 +507,37 @@ class JellyfinHandler:
         _LOGGER.info(f"Jellyfin Items: ParentId={parent_id} (raw={parent_id_raw}), IncludeItemTypes={include_types}")
         
         items = []
+
+        # MA 2.8.8 的 Jellyfin provider 同步歌单库时，会从 get_media_folders
+        # 找到 CollectionType=playlists 的库，然后通过 /Users/{userId}/Items
+        # 携带 ParentId=netease_playlists_library 拉取具体歌单。这里必须和
+        # handle_search_items 里的虚拟歌单库保持一致，否则 Browse -> playlists
+        # 会显示目录入口，但同步时拿到 0 个歌单。
+        if parent_id == "netease_playlists_library":
+            _LOGGER.info("Jellyfin Items: 歌单库查询，返回用户收藏的歌单")
+            try:
+                await self.cloud_music._ensure_userinfo_loaded()
+
+                if hasattr(self.cloud_music, 'userinfo') and self.cloud_music.userinfo:
+                    uid = self.cloud_music.userinfo.get('uid')
+                    if uid:
+                        result = await self.cloud_music.netease_cloud_music(f'/user/playlist?uid={uid}')
+                        if result and result.get('playlist'):
+                            for playlist in result['playlist']:
+                                items.append(self._format_jellyfin_playlist(playlist))
+                            _LOGGER.info(f"Jellyfin: 返回 {len(items)} 个用户歌单")
+                    else:
+                        _LOGGER.warning("Jellyfin: 用户未登录，无法获取歌单")
+                else:
+                    _LOGGER.warning("Jellyfin: userinfo 未加载")
+            except Exception as e:
+                _LOGGER.error(f"Jellyfin: 获取用户歌单失败 - {e}", exc_info=True)
+
+            return self._success_response({
+                "Items": items,
+                "TotalRecordCount": len(items),
+                "StartIndex": 0
+            })
         
         # 1. 专辑 -> 歌曲
         if parent_id.startswith('al_'):
