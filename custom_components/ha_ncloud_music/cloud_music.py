@@ -1,4 +1,4 @@
-import uuid, time, logging, os, hashlib, aiohttp, requests, base64
+import uuid, time, logging, os, hashlib, aiohttp, requests, base64, asyncio
 from urllib.parse import quote
 from homeassistant.helpers.network import get_url
 from .http_api import http_get, http_cookie
@@ -151,6 +151,10 @@ class CloudMusic():
                     self.notification(f'请求数据失败，账号出现异常\n\ncode: {code} \nurl: {url} \n\n这种情况一般是接口问题，和插件没有关系')
         return res
 
+    async def _netease_cloud_music_timeout(self, url, timeout=8):
+        """播放链路专用请求，避免慢接口拖住 MA 的取流流程。"""
+        return await asyncio.wait_for(self.netease_cloud_music(url), timeout=timeout)
+
     async def async_get_lyric(self, song_id: str) -> dict:
         """
         获取歌词（支持多种格式 + Fallback）
@@ -198,6 +202,25 @@ class CloudMusic():
         
         return {'yrc': '', 'lrc': '', 'tlyric': '', 'type': 'none'}
 
+    async def _is_trial_clip(self, song_id, url_data):
+        """判断 /song/url/v1 返回的链接是否像试听片段。"""
+        if url_data.get('freeTrialInfo') is not None:
+            return True
+
+        stream_time = url_data.get('time') or 0
+        if stream_time <= 0 or stream_time > 65000:
+            return False
+
+        try:
+            detail = await self._netease_cloud_music_timeout(f'/song/detail?ids={song_id}', timeout=5)
+            songs = detail.get('songs') or []
+            duration = songs[0].get('dt', 0) if songs else 0
+            # 有些接口不会显式标 freeTrialInfo，但试听链接的 time 会明显短于真实时长。
+            return bool(duration and duration - stream_time > 10000)
+        except Exception as e:
+            _LOGGER.warning(f"检查试听片段失败 (ID: {song_id}): {e}")
+            return False
+
     # 获取音乐链接（智能兜底模式）
     async def song_url(self, id, level=None):
         """
@@ -216,24 +239,26 @@ class CloudMusic():
         timestamp = int(time.time() * 1000)
         
         # 1. 先尝试官方源
-        res = await self.netease_cloud_music(
+        res = await self._netease_cloud_music_timeout(
             f'/song/url/v1?id={id}&level={_level}&timestamp={timestamp}'
         )
         data = res.get('data', [{}])[0]
         url = data.get('url')
         trial_info = data.get('freeTrialInfo')
-        fee = 0 if trial_info is None else 1
+        is_trial_clip = await self._is_trial_clip(id, data) if url else False
+        fee = 1 if is_trial_clip else 0
         
         # 2. 检测是否可用（有URL且不是试听片段）
-        if url is not None and trial_info is None:
+        if url is not None and not is_trial_clip:
             return url, fee
         
         # 3. 官方源不可用（无URL或试听片段），尝试解灰
         # 音源锁定：pyncmd,bodian,kuwo（黄金三角，PoC测试最优解）
         _LOGGER.info(f"歌曲 {id} 需要解灰（试听限制或无URL），尝试解灰源")
         try:
-            res_unblock = await self.netease_cloud_music(
-                f'/song/url/match?id={id}&source=pyncmd,bodian,kuwo&timestamp={timestamp}'
+            res_unblock = await self._netease_cloud_music_timeout(
+                f'/song/url/match?id={id}&source=pyncmd,bodian,kuwo&timestamp={timestamp}',
+                timeout=8,
             )
             if res_unblock.get('code') == 200:
                 unblock_data = res_unblock.get('data', {})
@@ -246,10 +271,17 @@ class CloudMusic():
                     br = unblock_data.get('br', 0)
                     _LOGGER.info(f"歌曲 {id} 解灰成功，来源: {source}, 码率: {br//1000}k")
                     return unblock_url, 0
+        except asyncio.TimeoutError:
+            _LOGGER.warning(f"解灰超时 (ID: {id})")
         except Exception as e:
             _LOGGER.warning(f"解灰失败 (ID: {id}): {e}")
         
-        # 4. 解灰也失败，返回原始URL（可能是试听片段或None）
+        # 4. 解灰也失败时，不再把试听片段当成完整歌曲返回给 MA。
+        if is_trial_clip:
+            _LOGGER.warning(f"歌曲 {id} 只有试听片段且解灰失败，返回不可播")
+            return None, fee
+
+        # 5. 没有试听风险时保留原始结果（通常是无 URL）。
         _LOGGER.warning(f"歌曲 {id} 解灰失败，使用原始URL")
         return url, fee
 
