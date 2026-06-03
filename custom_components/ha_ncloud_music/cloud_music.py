@@ -155,6 +155,24 @@ class CloudMusic():
         """播放链路专用请求，避免慢接口拖住 MA 的取流流程。"""
         return await asyncio.wait_for(self.netease_cloud_music(url), timeout=timeout)
 
+    @staticmethod
+    def _extract_unblock_url(response):
+        """兼容不同解锁接口的返回格式，提取可播放链接。"""
+        data = response.get('data')
+
+        # /song/url/match 默认直接返回字符串链接。
+        if isinstance(data, str):
+            return data, response.get('source', 'match_default'), response.get('br', 0)
+
+        # /song/url/v1?unblock=true 以及部分实现会返回数组。
+        if isinstance(data, list):
+            data = data[0] if data else {}
+
+        if isinstance(data, dict):
+            return data.get('url'), data.get('source', 'unblock'), data.get('br', 0)
+
+        return None, 'unknown', 0
+
     async def async_get_lyric(self, song_id: str) -> dict:
         """
         获取歌词（支持多种格式 + Fallback）
@@ -244,7 +262,6 @@ class CloudMusic():
         )
         data = res.get('data', [{}])[0]
         url = data.get('url')
-        trial_info = data.get('freeTrialInfo')
         is_trial_clip = await self._is_trial_clip(id, data) if url else False
         fee = 1 if is_trial_clip else 0
         
@@ -257,10 +274,13 @@ class CloudMusic():
         _LOGGER.info(f"歌曲 {id} 需要解灰（试听限制或无URL），尝试解灰源")
         try:
             res_unblock = await self._netease_cloud_music_timeout(
-                f'/song/url/match?id={id}&source=pyncmd,bodian,kuwo&timestamp={timestamp}',
+                f'/song/url/match?id={id}&timestamp={timestamp}',
                 timeout=8,
             )
             if res_unblock.get('code') == 200:
+                # /song/url/match 默认会直接返回字符串链接，这里先拦住这种情况。
+                if isinstance(res_unblock.get('data'), str):
+                    return res_unblock.get('data'), 0
                 unblock_data = res_unblock.get('data', {})
                 # 处理数组格式返回
                 if isinstance(unblock_data, list):
