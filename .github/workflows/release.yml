@@ -20,6 +20,14 @@ jobs:
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *"-beta"* || "$TAG" == *"-alpha"* || "$TAG" == *"-rc"* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Release type: pre-release"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Release type: stable"
+          fi
+
           FILE="docs/releases/${TAG}.md"
           if [[ -f "$FILE" ]]; then
             echo "has_file=true" >> "$GITHUB_OUTPUT"
@@ -37,7 +45,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.file }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.notes.outputs.prerelease }}
 
       - name: Create Release With Auto Notes
         if: steps.notes.outputs.has_file != 'true'
@@ -46,4 +54,4 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.notes.outputs.prerelease }}
