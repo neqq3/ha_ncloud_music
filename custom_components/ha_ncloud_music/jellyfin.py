@@ -279,6 +279,8 @@ class JellyfinHandler:
             # 1. 无 ParentId：返回虚拟音乐库 (MA 的 get_media_folders 调用)
             if not parent_id:
                 _LOGGER.info("Jellyfin: 返回虚拟音乐库 (get_media_folders)")
+                await self.cloud_music._ensure_userinfo_loaded()
+                login_state = self.cloud_music.userinfo.get('uid') or 'guest'
                 response_data = {
                     "Items": [
                         {
@@ -287,7 +289,8 @@ class JellyfinHandler:
                             "Type": "CollectionFolder",
                             "CollectionType": "music",
                             "ServerId": "netease_server",
-                            "Etag": "netease_music_etag",
+                            # 登录状态改变后让 MA 重新同步虚拟库，避免继续使用登录前的空结果。
+                            "Etag": f"netease_music_etag_{login_state}",
                             "CanDownload": False,
                             "SupportsSync": False
                         },
@@ -299,7 +302,8 @@ class JellyfinHandler:
                             "Type": "CollectionFolder",
                             "CollectionType": "playlists",
                             "ServerId": "netease_server",
-                            "Etag": "netease_playlists_etag",
+                            # 歌单库依赖当前登录用户，ETag 必须随登录态变化。
+                            "Etag": f"netease_playlists_etag_{login_state}",
                             "CanDownload": False,
                             "SupportsSync": False
                         }

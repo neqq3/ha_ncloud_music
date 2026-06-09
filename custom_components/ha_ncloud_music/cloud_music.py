@@ -38,6 +38,7 @@ class CloudMusic():
         # 读取用户信息（延迟到第一次访问时加载，避免阻塞事件循环）
         self.userinfo_filepath = self.get_storage_dir('cloud_music.userinfo')
         self._userinfo_loaded = False
+        self._userinfo_mtime = None
         # 登录二维码
         self.login_qrcode = {
             'key': None,
@@ -51,14 +52,24 @@ class CloudMusic():
 
     async def _ensure_userinfo_loaded(self):
         """延迟加载 userinfo，避免阻塞事件循环"""
-        if self._userinfo_loaded:
+        try:
+            userinfo_mtime = os.path.getmtime(self.userinfo_filepath)
+        except OSError:
+            userinfo_mtime = None
+
+        # Docker 场景下登录状态可能由另一个入口写入 storage；
+        # 文件版本没变时才复用内存，变了就重新加载，避免 MA/Jellyfin 继续用旧登录态。
+        if self._userinfo_loaded and userinfo_mtime == self._userinfo_mtime:
             return
         self._userinfo_loaded = True
-        if os.path.exists(self.userinfo_filepath):
+        self._userinfo_mtime = userinfo_mtime
+        if userinfo_mtime is not None:
             # 在后台线程执行文件读取
             self.userinfo = await self.hass.async_add_executor_job(
                 load_json, self.userinfo_filepath
             )
+        else:
+            self.userinfo = {}
 
     def netease_image_url(self, url, size=200):
         return f'{url}?param={size}y{size}'
@@ -84,6 +95,8 @@ class CloudMusic():
                 'cookie': cookie
             }
             save_json(self.userinfo_filepath, self.userinfo)
+            self._userinfo_loaded = True
+            self._userinfo_mtime = os.path.getmtime(self.userinfo_filepath)
             return res_data
 
     # 二维码登录
@@ -108,10 +121,14 @@ class CloudMusic():
         res = await self.netease_cloud_music('/user/account')
         self.userinfo['uid'] = res['account']['id']
         save_json(self.userinfo_filepath, self.userinfo)
+        self._userinfo_loaded = True
+        self._userinfo_mtime = os.path.getmtime(self.userinfo_filepath)
 
     # 退出
     def logout(self):
         self.userinfo = {}
+        self._userinfo_loaded = True
+        self._userinfo_mtime = None
         self.login_qrcode = {
             'key': None,
             'time': None,
