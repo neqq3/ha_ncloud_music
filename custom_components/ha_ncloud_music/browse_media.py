@@ -52,6 +52,15 @@ ting_protocol = 'cloudmusic://ting/'
 search_protocol = 'cloudmusic://search/'
 play_protocol = 'cloudmusic://play/'
 
+def _format_artist_names(artists, default='未知歌手'):
+    """从网易云歌手数据中提取可安全展示的歌手名。"""
+    names = [
+        str(artist.get('name')).strip()
+        for artist in artists or []
+        if isinstance(artist, dict) and artist.get('name')
+    ]
+    return '/'.join(names) if names else default
+
 # 云音乐路由表
 class CloudMusicRouter():
 
@@ -1122,12 +1131,12 @@ async def async_play_media(media_player, cloud_music, media_content_id):
                 music_info = MusicInfo(
                     id=str(song_data['id']),
                     song=song_data['name'],
-                    singer='/'.join([ar['name'] for ar in song_data.get('ar', [])]),
+                    singer=_format_artist_names(song_data.get('ar')),
                     album=song_data.get('al', {}).get('name', ''),
                     duration=song_data.get('dt', 0) // 1000,
                     url=song_url,
                     picUrl=song_data.get('al', {}).get('picUrl', ''),
-                    source=MusicSource.URL
+                    source=MusicSource.URL.value
                 )
                 playlist = [music_info]
 
@@ -1255,5 +1264,4 @@ async def async_media_next_track(media_player, shuffle=False):
     if shuffle and hasattr(media_player, '_play_index'):
         _LOGGER.info(f"   随机索引: {media_player._play_index + 1}/{len(media_player._playlist_active)}")
     await media_player.async_play_media(MediaType.MUSIC, current_song.url)
-
 
