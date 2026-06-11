@@ -223,6 +223,27 @@ class JellyfinHandler:
             },
             "MediaType": "Audio"
         }
+
+    def _format_daily_recommendation_playlist(self) -> dict:
+        """返回每日推荐对应的 Jellyfin 虚拟歌单。"""
+        return {
+            "Id": "pl_daily",
+            "Name": "📅 每日推荐",
+            "Type": "Playlist",
+            "Owner": "网易云音乐",
+            "ChildCount": 30,
+            "ImageTags": {"Primary": "pl_daily"},
+            "BackdropImageTags": [],
+            "ProviderIds": {},
+            "UserData": {
+                "PlaybackPositionTicks": 0,
+                "PlayCount": 0,
+                "IsFavorite": False,
+                "Played": False
+            },
+            "MediaType": "Audio",
+            "IsFolder": False
+        }
     
     async def handle_search_items(self, request) -> web.Response:
         """
@@ -316,7 +337,7 @@ class JellyfinHandler:
             # 2. ParentId 是虚拟库 + Playlist 类型：返回用户收藏的歌单
             if parent_id == "netease_virtual_library" and 'Playlist' in include_types:
                 _LOGGER.info(f"Jellyfin: 请求虚拟库的歌单")
-                items = []
+                items = [self._format_daily_recommendation_playlist()]
                 try:
                     # 确保 userinfo 已加载
                     await self.cloud_music._ensure_userinfo_loaded()
@@ -329,7 +350,7 @@ class JellyfinHandler:
                             if result and result.get('playlist'):
                                 for pl in result['playlist']:
                                     items.append(self._format_jellyfin_playlist(pl))
-                                _LOGGER.info(f"Jellyfin: 返回 {len(items)} 个用户歌单")
+                                _LOGGER.info(f"Jellyfin: 返回 1 个每日推荐 + {len(result['playlist'])} 个用户歌单")
                         else:
                             _LOGGER.warning("Jellyfin: 用户未登录，无法获取歌单")
                     else:
@@ -351,10 +372,10 @@ class JellyfinHandler:
                     "StartIndex": 0
                 })
             
-            # 3. ParentId 是歌单库：返回用户收藏的歌单
+            # 3. ParentId 是歌单库：返回每日推荐和用户收藏的歌单
             if parent_id == "netease_playlists_library":
-                _LOGGER.info("Jellyfin: 歌单库查询，返回用户收藏的歌单")
-                items = []
+                _LOGGER.info("Jellyfin: 歌单库查询，返回每日推荐和用户收藏的歌单")
+                items = [self._format_daily_recommendation_playlist()]
                 try:
                     # 确保 userinfo 已加载
                     await self.cloud_music._ensure_userinfo_loaded()
@@ -367,7 +388,7 @@ class JellyfinHandler:
                             if result and result.get('playlist'):
                                 for pl in result['playlist']:
                                     items.append(self._format_jellyfin_playlist(pl))
-                                _LOGGER.info(f"Jellyfin: 返回 {len(items)} 个用户歌单")
+                                _LOGGER.info(f"Jellyfin: 返回 1 个每日推荐 + {len(result['playlist'])} 个用户歌单")
                         else:
                             _LOGGER.warning("Jellyfin: 用户未登录，无法获取歌单")
                     else:
@@ -428,14 +449,7 @@ class JellyfinHandler:
                     # 云音乐每天会为登录用户推荐 30 首歌曲
                     # 注意：Jellyfin 使用 pl_ 前缀（与普通歌单一致）
                     #       OpenSubsonic 使用 p_ 前缀
-                    items.append({
-                        "Id": "pl_daily",
-                        "Name": "📅 每日推荐",
-                        "Type": "Playlist",
-                        "MediaType": "Playlist",
-                        "IsFolder": False,
-                        "ImageTags": {"Primary": "pl_daily"},
-                    })
+                    items.append(self._format_daily_recommendation_playlist())
                     # ========== 每日推荐添加结束 ==========
                     # 确保 userinfo 已加载
                     await self.cloud_music._ensure_userinfo_loaded()
@@ -838,18 +852,7 @@ class JellyfinHandler:
                 # 返回虚拟歌单对象，让 MA 能够继续请求歌曲列表
                 if decoded_id == 'pl_daily':
                     _LOGGER.info("Jellyfin GET_ITEM: 返回每日推荐虚拟歌单")
-                    daily_playlist = {
-                        "Id": "pl_daily",
-                        "Name": "📅 每日推荐",
-                        "Type": "Playlist",
-                        "MediaType": "Playlist",
-                        "IsFolder": False,
-                        "ImageTags": {"Primary": "pl_daily"},
-                        "BackdropImageTags": [],
-                        "ChildCount": 30,  # 每日推荐固定 30 首
-                        "UserData": {"IsFavorite": False}
-                    }
-                    return self._success_response(daily_playlist)
+                    return self._success_response(self._format_daily_recommendation_playlist())
                 # ========== 每日推荐处理结束 ==========
                 
                 # 普通歌单处理
