@@ -19,6 +19,12 @@ VIRTUAL_SERVER_ID = "netease_jellyfin_server"
 # Jellyfin API 版本
 API_VERSION = "10.8.0"
 
+# Music Assistant 的 Jellyfin 同步路径对普通歌单 ID 的兼容性最好。
+# 这里对外暴露为 pl_0：保持“pl_数字”的形态，同时使用网易云真实歌单不会出现的 0
+# 作为本地保留 ID，避免和用户歌单、收藏歌单、官方歌单撞车。
+DAILY_PLAYLIST_ID = "pl_0"
+LEGACY_DAILY_PLAYLIST_ID = "pl_daily"
+
 
 class JellyfinHandler:
     """Jellyfin API 处理器 - 完全兼容 MA parser"""
@@ -227,12 +233,12 @@ class JellyfinHandler:
     def _format_daily_recommendation_playlist(self) -> dict:
         """返回每日推荐对应的 Jellyfin 虚拟歌单。"""
         return {
-            "Id": "pl_daily",
+            "Id": DAILY_PLAYLIST_ID,
             "Name": "📅 每日推荐",
             "Type": "Playlist",
             "Owner": "网易云音乐",
             "ChildCount": 30,
-            "ImageTags": {"Primary": "pl_daily"},
+            "ImageTags": {"Primary": DAILY_PLAYLIST_ID},
             "BackdropImageTags": [],
             "ProviderIds": {},
             "UserData": {
@@ -242,7 +248,25 @@ class JellyfinHandler:
                 "Played": False
             },
             "MediaType": "Audio",
-            "IsFolder": False
+        }
+
+    def _is_daily_recommendation_playlist_id(self, playlist_id: str) -> bool:
+        """判断是否为每日推荐虚拟歌单 ID。"""
+        return playlist_id in {DAILY_PLAYLIST_ID, LEGACY_DAILY_PLAYLIST_ID}
+
+    def _get_pagination_params(self, request, default_limit: int = 50) -> tuple[int, int]:
+        """兼容 Jellyfin 客户端常见的大小写分页参数。"""
+        start_index = int(request.query.get('StartIndex', request.query.get('startIndex', '0')))
+        limit = int(request.query.get('Limit', request.query.get('limit', str(default_limit))))
+        return start_index, limit
+
+    def _paginate_items(self, items: list, start_index: int, limit: int) -> dict:
+        """按 Jellyfin 响应格式返回分页后的 Items。"""
+        total_count = len(items)
+        return {
+            "Items": items[start_index:start_index + limit],
+            "TotalRecordCount": total_count,
+            "StartIndex": start_index
         }
     
     async def handle_search_items(self, request) -> web.Response:
@@ -253,10 +277,10 @@ class JellyfinHandler:
         - ParentId=xxx - 获取专辑/歌单的歌曲列表
         """
         search_term = request.query.get('searchTerm', '')
-        include_types = request.query.get('includeItemTypes', '')
+        include_types = request.query.get('includeItemTypes') or request.query.get('IncludeItemTypes', '')
         parent_id = request.query.get('ParentId', '')
         parent_id_raw = request.query.get('parentId', '')  # 小写形式
-        limit = int(request.query.get('limit', '50'))
+        start_index, limit = self._get_pagination_params(request)
         
         # 统一 ParentId（支持大小写）
         if not parent_id and parent_id_raw:
@@ -358,11 +382,7 @@ class JellyfinHandler:
                 except Exception as e:
                     _LOGGER.error(f"Jellyfin: 获取用户歌单失败 - {e}", exc_info=True)
                 
-                return self._success_response({
-                    "Items": items,
-                    "TotalRecordCount": len(items),
-                    "StartIndex": 0
-                })
+                return self._success_response(self._paginate_items(items, start_index, limit))
             
             # 3. ParentId 是虚拟库 + 其他类型：返回空（禁用 Artists/Albums/Tracks 同步）
             if parent_id == "netease_virtual_library":
@@ -396,11 +416,7 @@ class JellyfinHandler:
                 except Exception as e:
                     _LOGGER.error(f"Jellyfin: 获取用户歌单失败 - {e}", exc_info=True)
                 
-                return self._success_response({
-                    "Items": items,
-                    "TotalRecordCount": len(items),
-                    "StartIndex": 0
-                })
+                return self._success_response(self._paginate_items(items, start_index, limit))
         
         _LOGGER.info(f"Jellyfin Items: 搜索 searchTerm={search_term}, types={include_types}")
         
@@ -445,7 +461,7 @@ class JellyfinHandler:
                     _LOGGER.info("Jellyfin: 搜索'我的歌单'，返回用户收藏的歌单")
                     
                     # ========== 添加每日推荐（固定歌单，每天更新）==========
-                    # 使用特殊 ID "pl_daily"，始终显示在列表最前面
+                    # 使用数字式虚拟 ID，始终显示在列表最前面
                     # 云音乐每天会为登录用户推荐 30 首歌曲
                     # 注意：Jellyfin 使用 pl_ 前缀（与普通歌单一致）
                     #       OpenSubsonic 使用 p_ 前缀
@@ -521,6 +537,7 @@ class JellyfinHandler:
         parent_id_raw = request.query.get('parentId') or request.query.get('ParentId', '')
         parent_id = urllib.parse.unquote(parent_id_raw)
         include_types = request.query.get('includeItemTypes') or request.query.get('IncludeItemTypes', '')
+        start_index, limit = self._get_pagination_params(request, default_limit=100)
         
         _LOGGER.info(f"Jellyfin Items: ParentId={parent_id} (raw={parent_id_raw}), IncludeItemTypes={include_types}")
         
@@ -532,7 +549,11 @@ class JellyfinHandler:
         # handle_search_items 里的虚拟歌单库保持一致，否则 Browse -> playlists
         # 会显示目录入口，但同步时拿到 0 个歌单。
         if parent_id == "netease_playlists_library":
-            _LOGGER.info("Jellyfin Items: 歌单库查询，返回用户收藏的歌单")
+            _LOGGER.info("Jellyfin Items: 歌单库查询，返回每日推荐和用户收藏的歌单")
+            # MA 真正同步歌单库走的是这个 /Users/{userId}/Items 分支。
+            # 每日推荐必须在这里注入，否则 HA/Jellyfin 浏览端能看到入口，
+            # 但 MA 的媒体库同步结果里仍然不会出现这张虚拟歌单。
+            items.append(self._format_daily_recommendation_playlist())
             try:
                 await self.cloud_music._ensure_userinfo_loaded()
 
@@ -543,7 +564,7 @@ class JellyfinHandler:
                         if result and result.get('playlist'):
                             for playlist in result['playlist']:
                                 items.append(self._format_jellyfin_playlist(playlist))
-                            _LOGGER.info(f"Jellyfin: 返回 {len(items)} 个用户歌单")
+                            _LOGGER.info(f"Jellyfin: 返回 1 个每日推荐 + {len(result['playlist'])} 个用户歌单")
                     else:
                         _LOGGER.warning("Jellyfin: 用户未登录，无法获取歌单")
                 else:
@@ -551,11 +572,7 @@ class JellyfinHandler:
             except Exception as e:
                 _LOGGER.error(f"Jellyfin: 获取用户歌单失败 - {e}", exc_info=True)
 
-            return self._success_response({
-                "Items": items,
-                "TotalRecordCount": len(items),
-                "StartIndex": 0
-            })
+            return self._success_response(self._paginate_items(items, start_index, limit))
         
         # 1. 专辑 -> 歌曲
         if parent_id.startswith('al_'):
@@ -606,9 +623,9 @@ class JellyfinHandler:
         # 3. 歌单 -> 歌曲
         elif parent_id.startswith('pl_'):
             # ========== 特殊处理：每日推荐 ==========
-            # 每日推荐使用固定 ID "pl_daily"
+            # 每日推荐使用固定虚拟 ID
             # 调用云音乐 API /recommend/songs 获取今日推荐的 30 首歌曲
-            if parent_id == 'pl_daily':
+            if self._is_daily_recommendation_playlist_id(parent_id):
                 try:
                     _LOGGER.info("Jellyfin Items: 获取每日推荐歌曲")
                     # 调用 HA 集成中已实现的每日推荐 API
@@ -639,23 +656,18 @@ class JellyfinHandler:
                     _LOGGER.error(f"Jellyfin Items (Playlist): 失败 - {e}")
 
         _LOGGER.info(f"📊 Jellyfin Items 返回: {len(items)} 个项目 (ParentId={parent_id})")
-        return self._success_response({
-            "Items": items,
-            "TotalRecordCount": len(items),
-            "StartIndex": 0
-        })
+        return self._success_response(self._paginate_items(items, start_index, limit))
 
     async def handle_playlist_items(self, request, playlist_id: str) -> web.Response:
         """GET /Playlists/{id}/Items"""
         
         # 分页参数
-        start_index = int(request.query.get('startIndex', 0))
-        limit = int(request.query.get('limit', 100))
+        start_index, limit = self._get_pagination_params(request, default_limit=100)
         
         items = []
         
         # ========== 特殊处理：每日推荐 ==========
-        if playlist_id == 'pl_daily':
+        if self._is_daily_recommendation_playlist_id(playlist_id):
             try:
                 _LOGGER.info("Jellyfin Playlist Items: 获取每日推荐歌曲")
                 # 调用 HA 集成中已实现的每日推荐 API
@@ -676,7 +688,7 @@ class JellyfinHandler:
                     }
                     items.append(self._format_jellyfin_song(song_dict))
                 
-                _LOGGER.info(f"Jellyfin Playlist: pl_daily 返回 {len(items)}/{total_count} 首歌曲 (offset={start_index})")
+                _LOGGER.info(f"Jellyfin Playlist: {playlist_id} 返回 {len(items)}/{total_count} 首歌曲 (offset={start_index})")
                 
                 return self._success_response({
                     "Items": items,
@@ -848,9 +860,9 @@ class JellyfinHandler:
             # 歌单
             elif decoded_id.startswith('pl_'):
                 # ========== 特殊处理：每日推荐 ==========
-                # pl_daily 是虚拟歌单，不存在于云音乐 API 中
+                # 每日推荐是虚拟歌单，不存在于云音乐 API 中
                 # 返回虚拟歌单对象，让 MA 能够继续请求歌曲列表
-                if decoded_id == 'pl_daily':
+                if self._is_daily_recommendation_playlist_id(decoded_id):
                     _LOGGER.info("Jellyfin GET_ITEM: 返回每日推荐虚拟歌单")
                     return self._success_response(self._format_daily_recommendation_playlist())
                 # ========== 每日推荐处理结束 ==========
@@ -934,7 +946,7 @@ class JellyfinHandler:
             elif item_type == 'pl':
                 # ========== 特殊处理：每日推荐封面 ==========
                 # 使用第一首推荐歌曲的专辑封面作为歌单封面
-                if decoded_id == 'pl_daily':
+                if self._is_daily_recommendation_playlist_id(decoded_id):
                     try:
                         songs = await self.cloud_music.async_get_dailySongs()
                         if songs and len(songs) > 0:
@@ -943,6 +955,10 @@ class JellyfinHandler:
                             if pic_url:
                                 _LOGGER.info(f"✅ Jellyfin GET_IMAGE: 每日推荐封面 {pic_url[:50]}...")
                                 raise web.HTTPFound(pic_url)
+                    except web.HTTPFound:
+                        # aiohttp 的重定向是通过异常实现的，必须放行；
+                        # 否则会被下面的通用异常捕获，最终错误地返回 404。
+                        raise
                     except Exception as e:
                         _LOGGER.error(f"获取每日推荐封面失败: {e}")
                 # ========== 每日推荐封面处理结束 ==========
