@@ -80,6 +80,12 @@ AUDIO_QUALITY_OPTIONS = {
 CONF_NEXT_TRACK_TIMING = "next_track_timing"
 DEFAULT_NEXT_TRACK_TIMING = 0.0
 
+# 播放启动失败重试禁用列表
+CONF_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS = (
+    "playback_startup_recovery_disabled_players"
+)
+DEFAULT_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS = []
+
 # ==================== 私人 FM 相关 ====================
 # FM 模式映射：显示名称 -> (mode, submode)
 FM_MODES = {

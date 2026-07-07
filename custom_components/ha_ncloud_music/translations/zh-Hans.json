@@ -25,9 +25,21 @@
                 "description": "关联的媒体播放器必须支持自定义音乐资源，可通过TTS插件自行测试是否可用。\n\n【说明】此处仅设置期望的最高音质。实际播放音质受限于您的账号权益。\n注意：高音质/特效音质依赖播放设备解码，若设备不支持可能导致静音或播放失败。",
                 "data": {
                     "media_player": "关联媒体播放器",
-                    "audio_quality": "首选音质",
-                    "next_track_timing": "切歌时机 (秒)",
-                    "url": "第三方音乐接口"
+                    "default_player": "默认播放器",
+                    "audio_quality": "首选音质"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "高级设置",
+                        "data": {
+                            "next_track_timing": "切歌时机 (秒)",
+                            "url": "第三方音乐接口",
+                            "playback_startup_recovery_disabled_players": "禁用播放启动失败重试的设备"
+                        },
+                        "data_description": {
+                            "playback_startup_recovery_disabled_players": "默认情况下，设备在播放命令发出后长时间未报告正在播放时，组件会自动重试一次。若某些设备已经播放但状态更新较慢，导致歌曲重新开始，请在此禁用该设备的自动重试。"
+                        }
+                    }
                 }
             }
         },

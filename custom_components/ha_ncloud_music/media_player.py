@@ -16,7 +16,14 @@ from homeassistant.const import (
     STATE_IDLE,
 )
 
-from .const import CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING, FM_MODES, DEFAULT_FM_MODE
+from .const import (
+    CONF_NEXT_TRACK_TIMING,
+    CONF_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+    DEFAULT_FM_MODE,
+    DEFAULT_NEXT_TRACK_TIMING,
+    DEFAULT_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+    FM_MODES,
+)
 
 from .manifest import manifest
 
@@ -31,6 +38,7 @@ SUPPORT_FEATURES = MediaPlayerEntityFeature.VOLUME_STEP | MediaPlayerEntityFeatu
 # 定时器时间
 TIME_BETWEEN_UPDATES = datetime.timedelta(seconds=1)
 UNSUB_INTERVAL = None
+PLAYBACK_STARTUP_CONFIRMATION_THRESHOLD = 3
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -77,11 +85,15 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
         # 读取切歌时机配置
         self._next_track_timing = entry.options.get(CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING) if hasattr(entry, 'options') else DEFAULT_NEXT_TRACK_TIMING
+        self._playback_startup_recovery_enabled = self._is_playback_startup_recovery_enabled(entry)
 
         self.cloud_music = hass.data['cloud_music']
         self.before_state = None
         self.current_state = None
         self._last_position_update = None
+        self._startup_confirmation_miss_count = 0
+        self._recovery_in_progress = False
+        self._startup_recovery_attempted = False
         
 
         # 播放列表管理 - 方案C随机播放
@@ -105,6 +117,31 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         # 外部接管结束后，用户按播放时强制恢复本集成歌曲，避免恢复到 TTS 音频
         self._resume_with_owned_media = False
 
+    def _is_playback_startup_recovery_enabled(self, entry):
+        disabled_players = set(
+            entry.options.get(
+                CONF_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+                DEFAULT_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+            )
+        ) if hasattr(entry, 'options') else set()
+        return self.source_media_player not in disabled_players
+
+    def _reset_playback_startup_recovery_state(self, reset_attempted=True):
+        """Reset startup retry counters for a new playback session."""
+        self._startup_confirmation_miss_count = 0
+        self._recovery_in_progress = False
+        if reset_attempted:
+            self._startup_recovery_attempted = False
+
+    def _safe_media_id_for_log(self):
+        media_id = getattr(self, '_attr_media_content_id', None)
+        if media_id is None:
+            return None
+        media_id = str(media_id)
+        if media_id.startswith(('http://', 'https://')):
+            return '<url>'
+        return media_id
+
 
     def interval(self, now):
         """定时器回调 - 参考lsCoding666实现"""
@@ -120,48 +157,72 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         if media_player is not None:
             attrs = media_player.attributes
             
-            # ========== 幽灵播放检测与恢复 ==========
-            # 检测代理 PLAYING 但底层 idle/off 的情况（幽灵播放）
-            # 连续 3 秒检测到则触发恢复（重新发送 play_media）
+            # ========== 播放启动确认与重试 ==========
+            # 代理 PLAYING 但底层启动确认窗口后仍 idle/off 时，最多自动重试一次。
             source_state = media_player.state
-            # 外部接管期间，禁止幽灵恢复，避免 TTS 结束后误拉起历史歌曲
+            expected_playing = self.hass.loop.time() <= self._expect_source_playing_until
             if self._external_playback_active:
-                self._ghost_playback_count = 0
+                self._startup_confirmation_miss_count = 0
                 self._recovery_in_progress = False
                 return
-            if source_state in (STATE_IDLE, STATE_OFF):
-                if self._manual_stop_requested:
-                    # 用户明确执行 stop 后，不应触发自动恢复
-                    self._ghost_playback_count = 0
-                    self._recovery_in_progress = False
-                    return
 
-                # 底层没在播放，累加幽灵播放计数
-                ghost_count = getattr(self, '_ghost_playback_count', 0) + 1
-                self._ghost_playback_count = ghost_count
-                
-                if ghost_count >= 3 and not getattr(self, '_recovery_in_progress', False):
-                    # 连续 3 秒幽灵播放，触发恢复
-                    _LOGGER.warning(f"检测到幽灵播放（连续 {ghost_count} 秒），尝试恢复播放")
+            if self._manual_stop_requested:
+                self._startup_confirmation_miss_count = 0
+                self._recovery_in_progress = False
+                return
+
+            if not self._playback_startup_recovery_enabled:
+                self._reset_playback_startup_recovery_state()
+                if source_state in (STATE_IDLE, STATE_OFF):
+                    _LOGGER.debug(
+                        "跳过播放启动失败重试：底层播放器已禁用重试。"
+                        "source=%s state=%s miss_count=%s media_id=%s action=disabled/skip",
+                        self.source_media_player,
+                        source_state,
+                        self._startup_confirmation_miss_count,
+                        self._safe_media_id_for_log(),
+                    )
+            elif expected_playing:
+                self._startup_confirmation_miss_count = 0
+            elif source_state in (STATE_IDLE, STATE_OFF):
+                miss_count = self._startup_confirmation_miss_count + 1
+                self._startup_confirmation_miss_count = miss_count
+
+                if (
+                    miss_count >= PLAYBACK_STARTUP_CONFIRMATION_THRESHOLD
+                    and not self._recovery_in_progress
+                    and not self._startup_recovery_attempted
+                ):
+                    _LOGGER.warning(
+                        "底层播放器在播放启动确认窗口后仍处于 idle/off，尝试重新发送一次播放命令。"
+                        "source=%s state=%s miss_count=%s media_id=%s action=retry",
+                        self.source_media_player,
+                        source_state,
+                        miss_count,
+                        self._safe_media_id_for_log(),
+                    )
                     self._recovery_in_progress = True
-                    self._ghost_playback_count = 0
-                    
-                    # 重新发送当前歌曲的 play_media 命令
+                    self._startup_recovery_attempted = True
+                    self._startup_confirmation_miss_count = 0
+
                     if hasattr(self, '_attr_media_content_id') and self._attr_media_content_id:
                         self.hass.loop.call_soon_threadsafe(
-                            lambda: self.hass.create_task(self._recover_playback())
+                            lambda: self.hass.create_task(self._retry_playback_start())
                         )
                     else:
-                        _LOGGER.error("无法恢复：没有 media_content_id")
+                        _LOGGER.error(
+                            "无法重试播放启动：没有 media_content_id。"
+                            "source=%s state=%s miss_count=%s action=skip",
+                            self.source_media_player,
+                            source_state,
+                            miss_count,
+                        )
                         self._recovery_in_progress = False
-                
-                # 幽灵播放时不累加 position，等待恢复
-                return
             else:
-                # 底层正常播放，重置幽灵计数和恢复标志
-                self._ghost_playback_count = 0
+                # 底层正常播放，重置启动确认失败计数和恢复标志
+                self._startup_confirmation_miss_count = 0
                 self._recovery_in_progress = False
-            # ========== 幽灵播放检测结束 ==========
+            # ========== 播放启动确认与重试结束 ==========
             
             # 纯自主计时模式（配合底层开始播放时重置 _last_position_update 的机制）
             # 不再同步底层 position，因为底层有延迟会导致歌词不准
@@ -326,6 +387,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
     async def async_play_media(self, media_type, media_id, **kwargs):
         self._manual_stop_requested = False
+        self._reset_playback_startup_recovery_state()
 
         self._attr_state = STATE_PAUSED
         # 重置进度计时
@@ -413,6 +475,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
     async def async_media_play(self):
         was_manual_stop = self._manual_stop_requested
         self._manual_stop_requested = False
+        self._reset_playback_startup_recovery_state()
         self._attr_state = STATE_PLAYING
         # stop 后首次播放，或外部接管结束后恢复，均优先播放本集成媒体，避免恢复到 TTS 缓存内容
         force_owned_media = self._resume_with_owned_media or was_manual_stop
@@ -676,6 +739,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         self._last_position_update = None
         self._next_track_scheduled = False
         self._is_new_track = True  # 标记为新歌
+        self._reset_playback_startup_recovery_state()
         
         # 更新元数据
         self._attr_app_name = first_song.singer
@@ -787,6 +851,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
     async def async_media_next_track(self):
         self._attr_state = STATE_PAUSED
+        self._reset_playback_startup_recovery_state()
         await self.cloud_music.async_media_next_track(self, self._attr_shuffle)
         
         # FM 模式：检查是否需要预加载
@@ -795,6 +860,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
     async def async_media_previous_track(self):
         self._attr_state = STATE_PAUSED
+        self._reset_playback_startup_recovery_state()
         await self.cloud_music.async_media_previous_track(self, self._attr_shuffle)
 
     async def async_media_seek(self, position):
@@ -841,9 +907,13 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
         self.before_state = None
         return True
 
-    async def _recover_playback(self):
-        """幽灵播放恢复：重新发送 play_media 命令"""
-        if self._manual_stop_requested:
+    async def _retry_playback_start(self):
+        """播放启动失败重试：重新发送 play_media 命令。"""
+        if (
+            not self._playback_startup_recovery_enabled
+            or self._manual_stop_requested
+            or self.hass.loop.time() <= self._expect_source_playing_until
+        ):
             self._recovery_in_progress = False
             return
 
@@ -851,7 +921,12 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             media_content_id = self._attr_media_content_id
             current_position = self._attr_media_position or 0
             
-            _LOGGER.info(f"🔄 恢复播放: {self._attr_media_title}, 位置: {current_position}s")
+            _LOGGER.info(
+                "重试播放启动: source=%s position=%ss media_id=%s action=retry",
+                self.source_media_player,
+                current_position,
+                self._safe_media_id_for_log(),
+            )
             
             # 重新发送 play_media 到底层播放器
             await self.async_call('play_media', {
@@ -883,8 +958,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
     async def async_media_stop(self):
         self._manual_stop_requested = True
-        self._ghost_playback_count = 0
-        self._recovery_in_progress = False
+        self._reset_playback_startup_recovery_state()
         self._next_track_scheduled = False
         self.before_state = None
         self._attr_media_position = 0
@@ -904,6 +978,9 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
             entry = self.hass.config_entries.async_get_entry(self.registry_entry.config_entry_id)
             if entry:
                 self._next_track_timing = entry.options.get(CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING)
+                self._playback_startup_recovery_enabled = self._is_playback_startup_recovery_enabled(entry)
+                if not self._playback_startup_recovery_enabled:
+                    self._reset_playback_startup_recovery_state()
 
     async def async_added_to_hass(self):
         """当实体添加到 HA 时调用"""
@@ -951,7 +1028,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
                 if external_takeover:
                     self._external_playback_active = True
                     self._state_before_external_playback = self._attr_state
-                    self._ghost_playback_count = 0
+                    self._startup_confirmation_miss_count = 0
                     self._recovery_in_progress = False
                     self._next_track_scheduled = False
                     # 外部接管结束后，按“播放”应恢复本集成音频，不应恢复到 TTS
@@ -1010,7 +1087,7 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
                         self._attr_state = restore_state
 
                     self.before_state = None
-                    self._ghost_playback_count = 0
+                    self._startup_confirmation_miss_count = 0
                     self._recovery_in_progress = False
                     self._next_track_scheduled = False
                     self._external_playback_active = False

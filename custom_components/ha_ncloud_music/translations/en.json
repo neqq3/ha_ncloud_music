@@ -25,8 +25,21 @@
         "description": "The linked media player must support custom music sources. You can test availability using a TTS plugin.\n\n[Note] This sets your preferred maximum audio quality. Actual playback quality depends on your account privileges.\nWarning: Hi-Fi/special audio formats require device decoding support. Unsupported devices may result in silence or playback failure.",
         "data": {
           "media_player": "Linked Media Player",
-          "audio_quality": "Preferred Audio Quality",
-          "url": "Third-party Music API"
+          "default_player": "Default Player",
+          "audio_quality": "Preferred Audio Quality"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "data": {
+              "next_track_timing": "Track change timing (seconds)",
+              "url": "Third-party Music API",
+              "playback_startup_recovery_disabled_players": "Disable playback startup retry for"
+            },
+            "data_description": {
+              "playback_startup_recovery_disabled_players": "By default, the integration retries once when a device does not report playback after a play command. Disable retry here for devices that are already playing but update their state slowly, causing tracks to restart."
+            }
+          }
         }
       }
     },

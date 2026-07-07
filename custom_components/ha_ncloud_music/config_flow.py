@@ -4,7 +4,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, OptionsFlow, ConfigEntry
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, SectionConfig, section
 from homeassistant.const import CONF_URL, CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers.storage import STORAGE_DIR
 from urllib.parse import quote
@@ -15,6 +15,7 @@ from .manifest import manifest
 from .http_api import fetch_data
 
 DOMAIN = manifest.domain
+CONF_ADVANCED = "advanced"
 
 class SimpleConfigFlow(ConfigFlow, domain=DOMAIN):
 
@@ -70,7 +71,18 @@ class OptionsFlowHandler(OptionsFlow):
         errors = {}
         
         if user_input is not None:
-            return self.async_create_entry(title='', data=user_input)
+            submitted_options = dict(user_input)
+            advanced_options = submitted_options.pop(CONF_ADVANCED, None)
+
+            new_options = dict(self._config_entry.options)
+            new_options.update(submitted_options)
+
+            if isinstance(advanced_options, dict):
+                new_options.update(advanced_options)
+
+            new_options.pop("ghost_playback_recovery", None)
+
+            return self.async_create_entry(title='', data=new_options)
         
         media_states = self.hass.states.async_all('media_player')
         media_entities = []
@@ -96,8 +108,19 @@ class OptionsFlowHandler(OptionsFlow):
         ]
         
         # 切歌时机选项 (自定义秒数)
-        from .const import CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING
+        from .const import (
+            CONF_NEXT_TRACK_TIMING,
+            CONF_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+            DEFAULT_NEXT_TRACK_TIMING,
+            DEFAULT_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+        )
         current_timing = options.get(CONF_NEXT_TRACK_TIMING, DEFAULT_NEXT_TRACK_TIMING)
+        disabled_recovery_players = set(
+            options.get(
+                CONF_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+                DEFAULT_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+            )
+        )
         
         # 默认播放器选项（从已配置的云音乐播放器中选择）
         from .const import CONF_DEFAULT_PLAYER
@@ -115,11 +138,38 @@ class OptionsFlowHandler(OptionsFlow):
                 # 提取 entity_id 后半部分作为名称
                 label = player_id.split('.')[-1] if '.' in player_id else player_id
             cloud_music_players.append({'label': label, 'value': player_id})
+        current_disabled_recovery_players = [
+            player_id for player_id in current_media_players
+            if player_id in disabled_recovery_players
+        ]
         
         # 添加「自动选择」选项
         default_player_options = [{'label': '自动选择（第一个可用）', 'value': ''}] + cloud_music_players
 
-        DATA_SCHEMA = vol.Schema({
+        advanced_fields = {
+            vol.Required(CONF_NEXT_TRACK_TIMING, default=current_timing): selector({
+                "number": {
+                    "min": -5.0,
+                    "max": 5.0,
+                    "step": 0.1,
+                    "unit_of_measurement": "s",
+                    "mode": "box"
+                }
+            }),
+            vol.Optional(CONF_URL, default=options.get(CONF_URL, '')): str,
+            vol.Required(
+                CONF_PLAYBACK_STARTUP_RECOVERY_DISABLED_PLAYERS,
+                default=current_disabled_recovery_players,
+            ): selector({
+                "select": {
+                    "options": cloud_music_players,
+                    "multiple": True,
+                    "mode": "dropdown",
+                }
+            }),
+        }
+
+        schema_fields = {
             vol.Required('media_player', default=current_media_players): selector({
                 "select": {
                     "options": media_entities,
@@ -138,16 +188,13 @@ class OptionsFlowHandler(OptionsFlow):
                     "mode": "dropdown"
                 }
             }),
-            vol.Required(CONF_NEXT_TRACK_TIMING, default=current_timing): selector({
-                "number": {
-                    "min": -5.0,
-                    "max": 5.0,
-                    "step": 0.1,
-                    "unit_of_measurement": "s",
-                    "mode": "box"
-                }
-            }),
-            vol.Optional(CONF_URL, default=options.get(CONF_URL, '')): str
-        })
+        }
+
+        schema_fields[vol.Required(CONF_ADVANCED)] = section(
+            vol.Schema(advanced_fields),
+            SectionConfig(collapsed=True),
+        )
+
+        DATA_SCHEMA = vol.Schema(schema_fields)
         
         return self.async_show_form(step_id="user", data_schema=DATA_SCHEMA, errors=errors)
