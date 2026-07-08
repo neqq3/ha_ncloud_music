@@ -173,15 +173,6 @@ class CloudMusicMediaPlayer(MediaPlayerEntity):
 
             if not self._playback_startup_recovery_enabled:
                 self._reset_playback_startup_recovery_state()
-                if source_state in (STATE_IDLE, STATE_OFF):
-                    _LOGGER.debug(
-                        "跳过播放启动失败重试：底层播放器已禁用重试。"
-                        "source=%s state=%s miss_count=%s media_id=%s action=disabled/skip",
-                        self.source_media_player,
-                        source_state,
-                        self._startup_confirmation_miss_count,
-                        self._safe_media_id_for_log(),
-                    )
             elif expected_playing:
                 self._startup_confirmation_miss_count = 0
             elif source_state in (STATE_IDLE, STATE_OFF):
